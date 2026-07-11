@@ -1,4 +1,5 @@
-﻿using System;
+﻿using JetBrains.Annotations;
+using System;
 using System.Collections.Generic;
 using System.IO.Ports;
 using System.Threading;
@@ -12,6 +13,8 @@ namespace KSPMacropad
         SerialPort serialPort = new SerialPort("COM3", 115200);
         private Queue<byte[]> messageQueue = new Queue<byte[]>();
         private readonly object queueLock = new object();
+
+        private byte[] ledStates = new byte[15];
 
         private bool running = false;
 
@@ -27,6 +30,7 @@ namespace KSPMacropad
             running = true;
             serialThread.Start();
 
+            InitializeLEDs();
         }
 
         //packet structure: [0x44][type: 1 byte][id: 1 byte][value: 2 bytes][0x77]
@@ -204,6 +208,43 @@ namespace KSPMacropad
                 running = false;
                 serialPort.Close();
             }
+        }
+
+        //LED packet structure: [0x77][led_id: 1 byte][state: 1 byte][data: 1 byte][0x44]
+        void UpdateLED(byte led_id, byte state, byte data)
+        {
+            if (serialPort != null && serialPort.IsOpen)
+            {
+                byte[] buffer = new byte[5];
+
+                buffer[0] = 0x77;
+                buffer[1] = led_id;
+                buffer[2] = state;
+                buffer[3] = data;
+                buffer[4] = 0x44;
+
+                serialPort.Write(buffer, 0, 5);
+            }
+        }
+
+        void UpdateUnderglow(byte state, byte data)
+        {
+            for (byte i = 0x10; i < 0x14; i++)
+            {
+                UpdateLED(i, state, data);
+            }
+        }
+
+        void InitializeLEDs()
+        {
+            Array.Clear(ledStates, 0, ledStates.Length);
+
+            for (int i = 0; i < 14; i++)
+            {
+                UpdateLED((byte)i, 0x00, 0x00);
+            }
+
+            UpdateUnderglow(0x00, 0x00);
         }
 
     }
