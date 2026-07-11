@@ -136,12 +136,32 @@ namespace KSPMacropad
                         switch(msg[2])
                         {
                             case 0x11:
-                                Debug.Log("[KSPMacropad] TURNED ENCODER: ENCDR_LEFT");
+                                Debug.Log("[KSPMacropad] TURNED ENCODER(mode 1): ENCDR_LEFT_MD1");
                                 steps = (short)((msg[3] << 8) | msg[4]);
                                 break;
 
                             case 0x12:
-                                Debug.Log("[KSPMacropad] TURNED ENCODER: ENCDR_RIGHT");
+                                Debug.Log("[KSPMacropad] TURNED ENCODER(mode 1): ENCDR_RIGHT_MD1");
+                                steps = (short)((msg[3] << 8) | msg[4]);
+                                break;
+
+                            case 0x21:
+                                Debug.Log("[KSPMacropad] TURNED ENCODER(mode 2): ENCDR_LEFT_MD2");
+                                steps = (short)((msg[3] << 8) | msg[4]);
+                                break;
+
+                            case 0x22:
+                                Debug.Log("[KSPMacropad] TURNED ENCODER(mode 2): ENCDR_RIGHT_MD2");
+                                steps = (short)((msg[3] << 8) | msg[4]);
+                                break;
+
+                            case 0x31:
+                                Debug.Log("[KSPMacropad] TURNED ENCODER(mode 3): ENCDR_LEFT_MD3");
+                                steps = (short)((msg[3] << 8) | msg[4]);
+                                break;
+
+                            case 0x32:
+                                Debug.Log("[KSPMacropad] TURNED ENCODER(mode 3): ENCDR_RIGHT_MD3");
                                 steps = (short)((msg[3] << 8) | msg[4]);
                                 break;
                         }
@@ -185,6 +205,7 @@ namespace KSPMacropad
                 serialPort.Close();
             }
         }
+
     }
 
     
