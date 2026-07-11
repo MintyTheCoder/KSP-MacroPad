@@ -44,5 +44,7 @@ bld/
 [Ll]og/
 [Ll]ogs/
 
+.vs/
+
 # Build results on 'Bin' directories
-**/[Bb]in/*
+/[Bb]in/
