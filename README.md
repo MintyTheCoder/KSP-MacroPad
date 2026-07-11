@@ -8,4 +8,4 @@ The key matrix uses an ADC-based resistor ladder instead of a traditional GPIO m
 
 ## Branches
 - `mod` — KSP C# plugin
-- `design` — PCB schematic and case files
+- `design` — PCB schematic files, case files, firmware files
