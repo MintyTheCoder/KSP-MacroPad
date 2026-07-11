@@ -2740,6 +2740,16 @@
 	)
 	(wire
 		(pts
+			(xy 114.3 58.42) (xy 114.3 60.96)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "c32fa71f-a4a8-4b59-ab73-c768b371b470")
+	)
+	(wire
+		(pts
 			(xy 88.9 86.36) (xy 88.9 91.44)
 		)
 		(stroke
@@ -2770,6 +2780,16 @@
 	)
 	(wire
 		(pts
+			(xy 114.3 71.12) (xy 114.3 73.66)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "c96ff9e0-c891-4e11-8eff-72c65d4714cd")
+	)
+	(wire
+		(pts
 			(xy 204.47 147.32) (xy 204.47 138.43)
 		)
 		(stroke
@@ -2777,6 +2797,16 @@
 			(type default)
 		)
 		(uuid "d2106a6a-0ecc-4414-b0d9-c68dac878711")
+	)
+	(wire
+		(pts
+			(xy 114.3 82.55) (xy 114.3 86.36)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d55af002-6ec9-43cf-92bd-486d4f7a1f70")
 	)
 	(wire
 		(pts
@@ -3229,7 +3259,7 @@
 		(uuid "6712edd3-99f6-4aad-8e93-a24b183a0219")
 	)
 	(label "ROW2"
-		(at 114.3 60.96 180)
+		(at 114.3 58.42 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -3279,7 +3309,7 @@
 		(uuid "6e4bb678-d3c7-48ee-ac70-4b314fce5a4c")
 	)
 	(label "ROW3"
-		(at 114.3 73.66 180)
+		(at 114.3 71.12 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -3579,7 +3609,7 @@
 		(uuid "dd4cab2b-28f6-408d-9334-2abca734ddf0")
 	)
 	(label "ROW4"
-		(at 114.3 86.36 180)
+		(at 114.3 82.55 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -3836,10 +3866,10 @@
 			)
 		)
 		(pin "2"
-			(uuid "ec24000d-3d65-4372-ab3d-09a356c857ce")
+			(uuid "ec24000d-3d65-4372-ab3d-09a356c857cf")
 		)
 		(pin "1"
-			(uuid "a3745daa-f025-40ee-8a4b-7581fbe041e6")
+			(uuid "a3745daa-f025-40ee-8a4b-7581fbe041e7")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -3917,10 +3947,10 @@
 			)
 		)
 		(pin "2"
-			(uuid "ec24000d-3d65-4372-ab3d-09a356c857ce")
+			(uuid "ec24000d-3d65-4372-ab3d-09a356c857d0")
 		)
 		(pin "1"
-			(uuid "a3745daa-f025-40ee-8a4b-7581fbe041e6")
+			(uuid "a3745daa-f025-40ee-8a4b-7581fbe041e8")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -3943,7 +3973,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "0db0c489-d77f-4b04-b0ae-4d5f6a0a861e")
-		(property "Reference" "D11"
+		(property "Reference" "D10"
 			(at 85.09 59.69 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4027,7 +4057,7 @@
 		(instances
 			(project "KSPMacroPad"
 				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
-					(reference "D11")
+					(reference "D10")
 					(unit 1)
 				)
 			)
@@ -4189,10 +4219,10 @@
 			)
 		)
 		(pin "2"
-			(uuid "ec24000d-3d65-4372-ab3d-09a356c857ce")
+			(uuid "ec24000d-3d65-4372-ab3d-09a356c857d1")
 		)
 		(pin "1"
-			(uuid "a3745daa-f025-40ee-8a4b-7581fbe041e6")
+			(uuid "a3745daa-f025-40ee-8a4b-7581fbe041e9")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -4215,7 +4245,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "15449146-6156-41ab-a347-7239cb435f2d")
-		(property "Reference" "D5"
+		(property "Reference" "D12"
 			(at 85.09 85.09 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4291,15 +4321,15 @@
 			)
 		)
 		(pin "2"
-			(uuid "8e7344c6-ee35-4ad5-aff2-168477cf5169")
+			(uuid "8e7344c6-ee35-4ad5-aff2-168477cf516a")
 		)
 		(pin "1"
-			(uuid "4b6c647e-292f-41cb-8f87-f5fa513afa23")
+			(uuid "4b6c647e-292f-41cb-8f87-f5fa513afa24")
 		)
 		(instances
 			(project "KSPMacroPad"
 				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
-					(reference "D5")
+					(reference "D12")
 					(unit 1)
 				)
 			)
@@ -4461,16 +4491,16 @@
 			)
 		)
 		(pin "3"
-			(uuid "2e740d0a-7aeb-46d1-946b-2e28bce25a0b")
+			(uuid "2e740d0a-7aeb-46d1-946b-2e28bce25a0c")
 		)
 		(pin "4"
-			(uuid "fd962345-b1ab-41e5-91a3-cab7cd3d6b79")
+			(uuid "fd962345-b1ab-41e5-91a3-cab7cd3d6b7a")
 		)
 		(pin "1"
-			(uuid "9f6d2659-d751-4f8d-8f34-c2466cc1665d")
+			(uuid "9f6d2659-d751-4f8d-8f34-c2466cc1665e")
 		)
 		(pin "2"
-			(uuid "528a4424-e5e2-4f9a-97dd-d3ba877dfa0f")
+			(uuid "528a4424-e5e2-4f9a-97dd-d3ba877dfa10")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -4548,10 +4578,10 @@
 			)
 		)
 		(pin "2"
-			(uuid "ec24000d-3d65-4372-ab3d-09a356c857ce")
+			(uuid "ec24000d-3d65-4372-ab3d-09a356c857d2")
 		)
 		(pin "1"
-			(uuid "a3745daa-f025-40ee-8a4b-7581fbe041e6")
+			(uuid "a3745daa-f025-40ee-8a4b-7581fbe041ea")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -4823,7 +4853,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "2e08b4ca-784f-4be2-a027-5ba7c31268af")
-		(property "Reference" "D13"
+		(property "Reference" "D6"
 			(at 59.69 59.69 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4899,15 +4929,15 @@
 			)
 		)
 		(pin "2"
-			(uuid "8e7344c6-ee35-4ad5-aff2-168477cf5169")
+			(uuid "8e7344c6-ee35-4ad5-aff2-168477cf516b")
 		)
 		(pin "1"
-			(uuid "4b6c647e-292f-41cb-8f87-f5fa513afa23")
+			(uuid "4b6c647e-292f-41cb-8f87-f5fa513afa25")
 		)
 		(instances
 			(project "KSPMacroPad"
 				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
-					(reference "D13")
+					(reference "D6")
 					(unit 1)
 				)
 			)
@@ -4981,16 +5011,16 @@
 			)
 		)
 		(pin "3"
-			(uuid "2e740d0a-7aeb-46d1-946b-2e28bce25a0b")
+			(uuid "2e740d0a-7aeb-46d1-946b-2e28bce25a0d")
 		)
 		(pin "4"
-			(uuid "fd962345-b1ab-41e5-91a3-cab7cd3d6b79")
+			(uuid "fd962345-b1ab-41e5-91a3-cab7cd3d6b7b")
 		)
 		(pin "1"
-			(uuid "9f6d2659-d751-4f8d-8f34-c2466cc1665d")
+			(uuid "9f6d2659-d751-4f8d-8f34-c2466cc1665f")
 		)
 		(pin "2"
-			(uuid "528a4424-e5e2-4f9a-97dd-d3ba877dfa0f")
+			(uuid "528a4424-e5e2-4f9a-97dd-d3ba877dfa11")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -5069,16 +5099,16 @@
 			)
 		)
 		(pin "3"
-			(uuid "2e740d0a-7aeb-46d1-946b-2e28bce25a0b")
+			(uuid "2e740d0a-7aeb-46d1-946b-2e28bce25a0e")
 		)
 		(pin "4"
-			(uuid "fd962345-b1ab-41e5-91a3-cab7cd3d6b79")
+			(uuid "fd962345-b1ab-41e5-91a3-cab7cd3d6b7c")
 		)
 		(pin "1"
-			(uuid "9f6d2659-d751-4f8d-8f34-c2466cc1665d")
+			(uuid "9f6d2659-d751-4f8d-8f34-c2466cc16660")
 		)
 		(pin "2"
-			(uuid "528a4424-e5e2-4f9a-97dd-d3ba877dfa0f")
+			(uuid "528a4424-e5e2-4f9a-97dd-d3ba877dfa12")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -5235,10 +5265,10 @@
 			)
 		)
 		(pin "2"
-			(uuid "38271600-e9c5-411a-9882-70e56510e816")
+			(uuid "38271600-e9c5-411a-9882-70e56510e817")
 		)
 		(pin "1"
-			(uuid "e7e086c7-c463-4b66-a442-223fd5a2b5e8")
+			(uuid "e7e086c7-c463-4b66-a442-223fd5a2b5e9")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -5316,10 +5346,10 @@
 			)
 		)
 		(pin "2"
-			(uuid "ec24000d-3d65-4372-ab3d-09a356c857ce")
+			(uuid "ec24000d-3d65-4372-ab3d-09a356c857d3")
 		)
 		(pin "1"
-			(uuid "a3745daa-f025-40ee-8a4b-7581fbe041e6")
+			(uuid "a3745daa-f025-40ee-8a4b-7581fbe041eb")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -5397,10 +5427,10 @@
 			)
 		)
 		(pin "2"
-			(uuid "ec24000d-3d65-4372-ab3d-09a356c857ce")
+			(uuid "ec24000d-3d65-4372-ab3d-09a356c857d4")
 		)
 		(pin "1"
-			(uuid "a3745daa-f025-40ee-8a4b-7581fbe041e6")
+			(uuid "a3745daa-f025-40ee-8a4b-7581fbe041ec")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -5423,7 +5453,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "50eec6b1-98c5-4e04-81bc-9a81685dc9f9")
-		(property "Reference" "D12"
+		(property "Reference" "D11"
 			(at 85.09 72.39 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5499,15 +5529,15 @@
 			)
 		)
 		(pin "2"
-			(uuid "8e7344c6-ee35-4ad5-aff2-168477cf5169")
+			(uuid "8e7344c6-ee35-4ad5-aff2-168477cf516c")
 		)
 		(pin "1"
-			(uuid "4b6c647e-292f-41cb-8f87-f5fa513afa23")
+			(uuid "4b6c647e-292f-41cb-8f87-f5fa513afa26")
 		)
 		(instances
 			(project "KSPMacroPad"
 				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
-					(reference "D12")
+					(reference "D11")
 					(unit 1)
 				)
 			)
@@ -5581,10 +5611,10 @@
 			)
 		)
 		(pin "2"
-			(uuid "a931fb51-8595-4481-8de0-da1d06f0bcae")
+			(uuid "a931fb51-8595-4481-8de0-da1d06f0bcaf")
 		)
 		(pin "1"
-			(uuid "e5790d57-8120-4045-85af-c3322eb51610")
+			(uuid "e5790d57-8120-4045-85af-c3322eb51611")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -5744,16 +5774,16 @@
 			)
 		)
 		(pin "3"
-			(uuid "2e740d0a-7aeb-46d1-946b-2e28bce25a0b")
+			(uuid "2e740d0a-7aeb-46d1-946b-2e28bce25a0f")
 		)
 		(pin "4"
-			(uuid "fd962345-b1ab-41e5-91a3-cab7cd3d6b79")
+			(uuid "fd962345-b1ab-41e5-91a3-cab7cd3d6b7d")
 		)
 		(pin "1"
-			(uuid "9f6d2659-d751-4f8d-8f34-c2466cc1665d")
+			(uuid "9f6d2659-d751-4f8d-8f34-c2466cc16661")
 		)
 		(pin "2"
-			(uuid "528a4424-e5e2-4f9a-97dd-d3ba877dfa0f")
+			(uuid "528a4424-e5e2-4f9a-97dd-d3ba877dfa13")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -5830,10 +5860,10 @@
 			)
 		)
 		(pin "2"
-			(uuid "38271600-e9c5-411a-9882-70e56510e816")
+			(uuid "38271600-e9c5-411a-9882-70e56510e818")
 		)
 		(pin "1"
-			(uuid "e7e086c7-c463-4b66-a442-223fd5a2b5e8")
+			(uuid "e7e086c7-c463-4b66-a442-223fd5a2b5ea")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -5911,10 +5941,10 @@
 			)
 		)
 		(pin "2"
-			(uuid "ec24000d-3d65-4372-ab3d-09a356c857ce")
+			(uuid "ec24000d-3d65-4372-ab3d-09a356c857d5")
 		)
 		(pin "1"
-			(uuid "a3745daa-f025-40ee-8a4b-7581fbe041e6")
+			(uuid "a3745daa-f025-40ee-8a4b-7581fbe041ed")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -5993,16 +6023,16 @@
 			)
 		)
 		(pin "3"
-			(uuid "2e740d0a-7aeb-46d1-946b-2e28bce25a0b")
+			(uuid "2e740d0a-7aeb-46d1-946b-2e28bce25a10")
 		)
 		(pin "4"
-			(uuid "fd962345-b1ab-41e5-91a3-cab7cd3d6b79")
+			(uuid "fd962345-b1ab-41e5-91a3-cab7cd3d6b7e")
 		)
 		(pin "1"
-			(uuid "9f6d2659-d751-4f8d-8f34-c2466cc1665d")
+			(uuid "9f6d2659-d751-4f8d-8f34-c2466cc16662")
 		)
 		(pin "2"
-			(uuid "528a4424-e5e2-4f9a-97dd-d3ba877dfa0f")
+			(uuid "528a4424-e5e2-4f9a-97dd-d3ba877dfa14")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -6080,10 +6110,10 @@
 			)
 		)
 		(pin "2"
-			(uuid "ec24000d-3d65-4372-ab3d-09a356c857ce")
+			(uuid "ec24000d-3d65-4372-ab3d-09a356c857d6")
 		)
 		(pin "1"
-			(uuid "a3745daa-f025-40ee-8a4b-7581fbe041e6")
+			(uuid "a3745daa-f025-40ee-8a4b-7581fbe041ee")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -6162,16 +6192,16 @@
 			)
 		)
 		(pin "3"
-			(uuid "2e740d0a-7aeb-46d1-946b-2e28bce25a0b")
+			(uuid "2e740d0a-7aeb-46d1-946b-2e28bce25a11")
 		)
 		(pin "4"
-			(uuid "fd962345-b1ab-41e5-91a3-cab7cd3d6b79")
+			(uuid "fd962345-b1ab-41e5-91a3-cab7cd3d6b7f")
 		)
 		(pin "1"
-			(uuid "9f6d2659-d751-4f8d-8f34-c2466cc1665d")
+			(uuid "9f6d2659-d751-4f8d-8f34-c2466cc16663")
 		)
 		(pin "2"
-			(uuid "528a4424-e5e2-4f9a-97dd-d3ba877dfa0f")
+			(uuid "528a4424-e5e2-4f9a-97dd-d3ba877dfa15")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -6250,16 +6280,16 @@
 			)
 		)
 		(pin "3"
-			(uuid "2e740d0a-7aeb-46d1-946b-2e28bce25a0b")
+			(uuid "2e740d0a-7aeb-46d1-946b-2e28bce25a12")
 		)
 		(pin "4"
-			(uuid "fd962345-b1ab-41e5-91a3-cab7cd3d6b79")
+			(uuid "fd962345-b1ab-41e5-91a3-cab7cd3d6b80")
 		)
 		(pin "1"
-			(uuid "9f6d2659-d751-4f8d-8f34-c2466cc1665d")
+			(uuid "9f6d2659-d751-4f8d-8f34-c2466cc16664")
 		)
 		(pin "2"
-			(uuid "528a4424-e5e2-4f9a-97dd-d3ba877dfa0f")
+			(uuid "528a4424-e5e2-4f9a-97dd-d3ba877dfa16")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -6338,16 +6368,16 @@
 			)
 		)
 		(pin "3"
-			(uuid "2e740d0a-7aeb-46d1-946b-2e28bce25a0b")
+			(uuid "2e740d0a-7aeb-46d1-946b-2e28bce25a13")
 		)
 		(pin "4"
-			(uuid "fd962345-b1ab-41e5-91a3-cab7cd3d6b79")
+			(uuid "fd962345-b1ab-41e5-91a3-cab7cd3d6b81")
 		)
 		(pin "1"
-			(uuid "9f6d2659-d751-4f8d-8f34-c2466cc1665d")
+			(uuid "9f6d2659-d751-4f8d-8f34-c2466cc16665")
 		)
 		(pin "2"
-			(uuid "528a4424-e5e2-4f9a-97dd-d3ba877dfa0f")
+			(uuid "528a4424-e5e2-4f9a-97dd-d3ba877dfa17")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -6506,10 +6536,10 @@
 			)
 		)
 		(pin "2"
-			(uuid "ec24000d-3d65-4372-ab3d-09a356c857ce")
+			(uuid "ec24000d-3d65-4372-ab3d-09a356c857d7")
 		)
 		(pin "1"
-			(uuid "a3745daa-f025-40ee-8a4b-7581fbe041e6")
+			(uuid "a3745daa-f025-40ee-8a4b-7581fbe041ef")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -6690,7 +6720,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "95d76a13-044e-4f1e-bddd-30d3ac18dcd6")
-		(property "Reference" "D7"
+		(property "Reference" "D14"
 			(at 110.49 59.69 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6766,15 +6796,15 @@
 			)
 		)
 		(pin "2"
-			(uuid "8e7344c6-ee35-4ad5-aff2-168477cf5169")
+			(uuid "8e7344c6-ee35-4ad5-aff2-168477cf516d")
 		)
 		(pin "1"
-			(uuid "4b6c647e-292f-41cb-8f87-f5fa513afa23")
+			(uuid "4b6c647e-292f-41cb-8f87-f5fa513afa27")
 		)
 		(instances
 			(project "KSPMacroPad"
 				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
-					(reference "D7")
+					(reference "D14")
 					(unit 1)
 				)
 			)
@@ -6848,16 +6878,16 @@
 			)
 		)
 		(pin "3"
-			(uuid "2e740d0a-7aeb-46d1-946b-2e28bce25a0b")
+			(uuid "2e740d0a-7aeb-46d1-946b-2e28bce25a14")
 		)
 		(pin "4"
-			(uuid "fd962345-b1ab-41e5-91a3-cab7cd3d6b79")
+			(uuid "fd962345-b1ab-41e5-91a3-cab7cd3d6b82")
 		)
 		(pin "1"
-			(uuid "9f6d2659-d751-4f8d-8f34-c2466cc1665d")
+			(uuid "9f6d2659-d751-4f8d-8f34-c2466cc16666")
 		)
 		(pin "2"
-			(uuid "528a4424-e5e2-4f9a-97dd-d3ba877dfa0f")
+			(uuid "528a4424-e5e2-4f9a-97dd-d3ba877dfa18")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -6880,7 +6910,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "9ac2b69b-b15d-43f3-93ff-81a699336a09")
-		(property "Reference" "D15"
+		(property "Reference" "D7"
 			(at 59.69 72.39 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6956,15 +6986,15 @@
 			)
 		)
 		(pin "2"
-			(uuid "8e7344c6-ee35-4ad5-aff2-168477cf5169")
+			(uuid "8e7344c6-ee35-4ad5-aff2-168477cf516e")
 		)
 		(pin "1"
-			(uuid "4b6c647e-292f-41cb-8f87-f5fa513afa23")
+			(uuid "4b6c647e-292f-41cb-8f87-f5fa513afa28")
 		)
 		(instances
 			(project "KSPMacroPad"
 				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
-					(reference "D15")
+					(reference "D7")
 					(unit 1)
 				)
 			)
@@ -6982,7 +7012,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "9cf21001-9d77-485c-9ec4-cdcb89311190")
-		(property "Reference" "D8"
+		(property "Reference" "D15"
 			(at 110.49 72.39 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7058,15 +7088,15 @@
 			)
 		)
 		(pin "2"
-			(uuid "8e7344c6-ee35-4ad5-aff2-168477cf5169")
+			(uuid "8e7344c6-ee35-4ad5-aff2-168477cf516f")
 		)
 		(pin "1"
-			(uuid "4b6c647e-292f-41cb-8f87-f5fa513afa23")
+			(uuid "4b6c647e-292f-41cb-8f87-f5fa513afa29")
 		)
 		(instances
 			(project "KSPMacroPad"
 				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
-					(reference "D8")
+					(reference "D15")
 					(unit 1)
 				)
 			)
@@ -7139,10 +7169,10 @@
 			)
 		)
 		(pin "2"
-			(uuid "ec24000d-3d65-4372-ab3d-09a356c857ce")
+			(uuid "ec24000d-3d65-4372-ab3d-09a356c857d8")
 		)
 		(pin "1"
-			(uuid "a3745daa-f025-40ee-8a4b-7581fbe041e6")
+			(uuid "a3745daa-f025-40ee-8a4b-7581fbe041f0")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -7323,16 +7353,16 @@
 			)
 		)
 		(pin "3"
-			(uuid "2e740d0a-7aeb-46d1-946b-2e28bce25a0b")
+			(uuid "2e740d0a-7aeb-46d1-946b-2e28bce25a15")
 		)
 		(pin "4"
-			(uuid "fd962345-b1ab-41e5-91a3-cab7cd3d6b79")
+			(uuid "fd962345-b1ab-41e5-91a3-cab7cd3d6b83")
 		)
 		(pin "1"
-			(uuid "9f6d2659-d751-4f8d-8f34-c2466cc1665d")
+			(uuid "9f6d2659-d751-4f8d-8f34-c2466cc16667")
 		)
 		(pin "2"
-			(uuid "528a4424-e5e2-4f9a-97dd-d3ba877dfa0f")
+			(uuid "528a4424-e5e2-4f9a-97dd-d3ba877dfa19")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -7411,16 +7441,16 @@
 			)
 		)
 		(pin "3"
-			(uuid "2e740d0a-7aeb-46d1-946b-2e28bce25a0b")
+			(uuid "2e740d0a-7aeb-46d1-946b-2e28bce25a16")
 		)
 		(pin "4"
-			(uuid "fd962345-b1ab-41e5-91a3-cab7cd3d6b79")
+			(uuid "fd962345-b1ab-41e5-91a3-cab7cd3d6b84")
 		)
 		(pin "1"
-			(uuid "9f6d2659-d751-4f8d-8f34-c2466cc1665d")
+			(uuid "9f6d2659-d751-4f8d-8f34-c2466cc16668")
 		)
 		(pin "2"
-			(uuid "528a4424-e5e2-4f9a-97dd-d3ba877dfa0f")
+			(uuid "528a4424-e5e2-4f9a-97dd-d3ba877dfa1a")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -7499,16 +7529,16 @@
 			)
 		)
 		(pin "3"
-			(uuid "2e740d0a-7aeb-46d1-946b-2e28bce25a0b")
+			(uuid "2e740d0a-7aeb-46d1-946b-2e28bce25a17")
 		)
 		(pin "4"
-			(uuid "fd962345-b1ab-41e5-91a3-cab7cd3d6b79")
+			(uuid "fd962345-b1ab-41e5-91a3-cab7cd3d6b85")
 		)
 		(pin "1"
-			(uuid "9f6d2659-d751-4f8d-8f34-c2466cc1665d")
+			(uuid "9f6d2659-d751-4f8d-8f34-c2466cc16669")
 		)
 		(pin "2"
-			(uuid "528a4424-e5e2-4f9a-97dd-d3ba877dfa0f")
+			(uuid "528a4424-e5e2-4f9a-97dd-d3ba877dfa1b")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -7607,10 +7637,10 @@
 			)
 		)
 		(pin "1"
-			(uuid "fc8b4c30-066d-4e94-be7c-49b324ed57d9")
+			(uuid "fc8b4c30-066d-4e94-be7c-49b324ed57da")
 		)
 		(pin "2"
-			(uuid "15b75bc3-0e98-4d76-90c3-6fb9398c4014")
+			(uuid "15b75bc3-0e98-4d76-90c3-6fb9398c4015")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -7966,16 +7996,16 @@
 			)
 		)
 		(pin "3"
-			(uuid "2e740d0a-7aeb-46d1-946b-2e28bce25a0b")
+			(uuid "2e740d0a-7aeb-46d1-946b-2e28bce25a18")
 		)
 		(pin "4"
-			(uuid "fd962345-b1ab-41e5-91a3-cab7cd3d6b79")
+			(uuid "fd962345-b1ab-41e5-91a3-cab7cd3d6b86")
 		)
 		(pin "1"
-			(uuid "9f6d2659-d751-4f8d-8f34-c2466cc1665d")
+			(uuid "9f6d2659-d751-4f8d-8f34-c2466cc1666a")
 		)
 		(pin "2"
-			(uuid "528a4424-e5e2-4f9a-97dd-d3ba877dfa0f")
+			(uuid "528a4424-e5e2-4f9a-97dd-d3ba877dfa1c")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -8162,10 +8192,10 @@
 			)
 		)
 		(pin "1"
-			(uuid "fc8b4c30-066d-4e94-be7c-49b324ed57d9")
+			(uuid "fc8b4c30-066d-4e94-be7c-49b324ed57db")
 		)
 		(pin "2"
-			(uuid "15b75bc3-0e98-4d76-90c3-6fb9398c4014")
+			(uuid "15b75bc3-0e98-4d76-90c3-6fb9398c4016")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -8330,10 +8360,10 @@
 			)
 		)
 		(pin "2"
-			(uuid "38271600-e9c5-411a-9882-70e56510e816")
+			(uuid "38271600-e9c5-411a-9882-70e56510e819")
 		)
 		(pin "1"
-			(uuid "e7e086c7-c463-4b66-a442-223fd5a2b5e8")
+			(uuid "e7e086c7-c463-4b66-a442-223fd5a2b5eb")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -8356,7 +8386,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "ccf44c98-4f69-4090-bde3-e4ce91b71e96")
-		(property "Reference" "D10"
+		(property "Reference" "D9"
 			(at 85.09 46.99 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8432,15 +8462,15 @@
 			)
 		)
 		(pin "2"
-			(uuid "8e7344c6-ee35-4ad5-aff2-168477cf5169")
+			(uuid "8e7344c6-ee35-4ad5-aff2-168477cf5170")
 		)
 		(pin "1"
-			(uuid "4b6c647e-292f-41cb-8f87-f5fa513afa23")
+			(uuid "4b6c647e-292f-41cb-8f87-f5fa513afa2a")
 		)
 		(instances
 			(project "KSPMacroPad"
 				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
-					(reference "D10")
+					(reference "D9")
 					(unit 1)
 				)
 			)
@@ -8514,16 +8544,16 @@
 			)
 		)
 		(pin "3"
-			(uuid "2e740d0a-7aeb-46d1-946b-2e28bce25a0b")
+			(uuid "2e740d0a-7aeb-46d1-946b-2e28bce25a19")
 		)
 		(pin "4"
-			(uuid "fd962345-b1ab-41e5-91a3-cab7cd3d6b79")
+			(uuid "fd962345-b1ab-41e5-91a3-cab7cd3d6b87")
 		)
 		(pin "1"
-			(uuid "9f6d2659-d751-4f8d-8f34-c2466cc1665d")
+			(uuid "9f6d2659-d751-4f8d-8f34-c2466cc1666b")
 		)
 		(pin "2"
-			(uuid "528a4424-e5e2-4f9a-97dd-d3ba877dfa0f")
+			(uuid "528a4424-e5e2-4f9a-97dd-d3ba877dfa1d")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -8601,10 +8631,10 @@
 			)
 		)
 		(pin "2"
-			(uuid "ec24000d-3d65-4372-ab3d-09a356c857ce")
+			(uuid "ec24000d-3d65-4372-ab3d-09a356c857d9")
 		)
 		(pin "1"
-			(uuid "a3745daa-f025-40ee-8a4b-7581fbe041e6")
+			(uuid "a3745daa-f025-40ee-8a4b-7581fbe041f1")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -8772,16 +8802,16 @@
 			)
 		)
 		(pin "3"
-			(uuid "2e740d0a-7aeb-46d1-946b-2e28bce25a0b")
+			(uuid "2e740d0a-7aeb-46d1-946b-2e28bce25a1a")
 		)
 		(pin "4"
-			(uuid "fd962345-b1ab-41e5-91a3-cab7cd3d6b79")
+			(uuid "fd962345-b1ab-41e5-91a3-cab7cd3d6b88")
 		)
 		(pin "1"
-			(uuid "9f6d2659-d751-4f8d-8f34-c2466cc1665d")
+			(uuid "9f6d2659-d751-4f8d-8f34-c2466cc1666c")
 		)
 		(pin "2"
-			(uuid "528a4424-e5e2-4f9a-97dd-d3ba877dfa0f")
+			(uuid "528a4424-e5e2-4f9a-97dd-d3ba877dfa1e")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -8860,10 +8890,10 @@
 			)
 		)
 		(pin "2"
-			(uuid "a931fb51-8595-4481-8de0-da1d06f0bcae")
+			(uuid "a931fb51-8595-4481-8de0-da1d06f0bcb0")
 		)
 		(pin "1"
-			(uuid "e5790d57-8120-4045-85af-c3322eb51610")
+			(uuid "e5790d57-8120-4045-85af-c3322eb51612")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -8967,7 +8997,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "dfd0f08a-43ca-4526-881b-b12a58015de5")
-		(property "Reference" "D9"
+		(property "Reference" "D16"
 			(at 110.49 85.09 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9043,15 +9073,15 @@
 			)
 		)
 		(pin "2"
-			(uuid "8e7344c6-ee35-4ad5-aff2-168477cf5169")
+			(uuid "8e7344c6-ee35-4ad5-aff2-168477cf5171")
 		)
 		(pin "1"
-			(uuid "4b6c647e-292f-41cb-8f87-f5fa513afa23")
+			(uuid "4b6c647e-292f-41cb-8f87-f5fa513afa2b")
 		)
 		(instances
 			(project "KSPMacroPad"
 				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
-					(reference "D9")
+					(reference "D16")
 					(unit 1)
 				)
 			)
@@ -9212,10 +9242,10 @@
 			)
 		)
 		(pin "2"
-			(uuid "ec24000d-3d65-4372-ab3d-09a356c857ce")
+			(uuid "ec24000d-3d65-4372-ab3d-09a356c857da")
 		)
 		(pin "1"
-			(uuid "a3745daa-f025-40ee-8a4b-7581fbe041e6")
+			(uuid "a3745daa-f025-40ee-8a4b-7581fbe041f2")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -9238,7 +9268,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "e286247f-e10e-454d-b620-f661458e322d")
-		(property "Reference" "D16"
+		(property "Reference" "D8"
 			(at 59.69 85.09 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9314,15 +9344,15 @@
 			)
 		)
 		(pin "2"
-			(uuid "8e7344c6-ee35-4ad5-aff2-168477cf5169")
+			(uuid "8e7344c6-ee35-4ad5-aff2-168477cf5172")
 		)
 		(pin "1"
-			(uuid "4b6c647e-292f-41cb-8f87-f5fa513afa23")
+			(uuid "4b6c647e-292f-41cb-8f87-f5fa513afa2c")
 		)
 		(instances
 			(project "KSPMacroPad"
 				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
-					(reference "D16")
+					(reference "D8")
 					(unit 1)
 				)
 			)
@@ -9396,10 +9426,10 @@
 			)
 		)
 		(pin "2"
-			(uuid "a931fb51-8595-4481-8de0-da1d06f0bcae")
+			(uuid "a931fb51-8595-4481-8de0-da1d06f0bcb1")
 		)
 		(pin "1"
-			(uuid "e5790d57-8120-4045-85af-c3322eb51610")
+			(uuid "e5790d57-8120-4045-85af-c3322eb51613")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -9498,10 +9528,10 @@
 			)
 		)
 		(pin "1"
-			(uuid "fc8b4c30-066d-4e94-be7c-49b324ed57d9")
+			(uuid "fc8b4c30-066d-4e94-be7c-49b324ed57dc")
 		)
 		(pin "2"
-			(uuid "15b75bc3-0e98-4d76-90c3-6fb9398c4014")
+			(uuid "15b75bc3-0e98-4d76-90c3-6fb9398c4017")
 		)
 		(instances
 			(project "KSPMacroPad"
@@ -9524,7 +9554,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "eb314334-8165-41ba-915c-cfee5537b3d8")
-		(property "Reference" "D14"
+		(property "Reference" "D5"
 			(at 59.69 46.99 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9600,15 +9630,15 @@
 			)
 		)
 		(pin "2"
-			(uuid "8e7344c6-ee35-4ad5-aff2-168477cf5169")
+			(uuid "8e7344c6-ee35-4ad5-aff2-168477cf5173")
 		)
 		(pin "1"
-			(uuid "4b6c647e-292f-41cb-8f87-f5fa513afa23")
+			(uuid "4b6c647e-292f-41cb-8f87-f5fa513afa2d")
 		)
 		(instances
 			(project "KSPMacroPad"
 				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
-					(reference "D14")
+					(reference "D5")
 					(unit 1)
 				)
 			)
@@ -9626,7 +9656,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "f399aef7-c7e6-4ba7-bce3-c042504b8ca9")
-		(property "Reference" "D6"
+		(property "Reference" "D13"
 			(at 110.49 46.99 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9702,15 +9732,15 @@
 			)
 		)
 		(pin "2"
-			(uuid "8e7344c6-ee35-4ad5-aff2-168477cf5169")
+			(uuid "8e7344c6-ee35-4ad5-aff2-168477cf5174")
 		)
 		(pin "1"
-			(uuid "4b6c647e-292f-41cb-8f87-f5fa513afa23")
+			(uuid "4b6c647e-292f-41cb-8f87-f5fa513afa2e")
 		)
 		(instances
 			(project "KSPMacroPad"
 				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
-					(reference "D6")
+					(reference "D13")
 					(unit 1)
 				)
 			)
@@ -9886,18 +9916,16 @@
 	)
 	(group ""
 		(uuid "f1fcd876-8ca0-4a25-8741-4c9dc3a698e5")
-		(members "0390d274-67dc-4569-abf2-2feb67f914be" "03f33ff5-d266-4e61-ac1f-5432e012ede4"
-			"04bbd878-fa70-4df4-ab7e-0a1db176eaf3" "05538f4d-f797-49a2-a396-e245ffb31ae6"
-			"08457df2-faef-4bf4-a84b-82e4e120d96b" "086e090b-6b1b-4651-8a5a-d5cd7fb76640"
-			"0c6dbe2c-85d8-4904-bf69-213a1d13eee8" "0c7f1936-21fb-4865-b4ed-3034b8395533"
-			"0db0c489-d77f-4b04-b0ae-4d5f6a0a861e" "10a04c62-e449-4315-8712-e6b8e9aaef3b"
-			"126cd328-b8e6-40a0-a55a-569c3a353b81" "15449146-6156-41ab-a347-7239cb435f2d"
-			"1aa3ae1c-25a4-4010-89e0-331ceea20aab" "1ae065c3-d770-4757-9312-bc93b40c0139"
-			"1b8fc16a-79ba-4a09-b20b-6495ad20caf4" "1e0c007c-fd91-48e7-af82-3d00be3d3a54"
-			"1f5cf1f1-ee2f-4f44-bf3f-c8f260202044" "2749bec2-12c0-4a18-977c-65e872464e42"
-			"29e9b491-b543-4af1-9111-4df0e78c9a38" "2c208aa3-a1fa-4059-9aea-73f4a7743e99"
-			"2e08b4ca-784f-4be2-a027-5ba7c31268af" "381969a8-70b5-4a1d-b79f-d7fdc1c5f4c3"
-			"44be45f7-2919-4e4e-8d88-606ed64cbb53" "47457d21-20c7-4988-bd1e-9234bed6841c"
+		(members "03f33ff5-d266-4e61-ac1f-5432e012ede4" "04bbd878-fa70-4df4-ab7e-0a1db176eaf3"
+			"05538f4d-f797-49a2-a396-e245ffb31ae6" "08457df2-faef-4bf4-a84b-82e4e120d96b"
+			"086e090b-6b1b-4651-8a5a-d5cd7fb76640" "0c6dbe2c-85d8-4904-bf69-213a1d13eee8"
+			"0c7f1936-21fb-4865-b4ed-3034b8395533" "0db0c489-d77f-4b04-b0ae-4d5f6a0a861e"
+			"10a04c62-e449-4315-8712-e6b8e9aaef3b" "126cd328-b8e6-40a0-a55a-569c3a353b81"
+			"15449146-6156-41ab-a347-7239cb435f2d" "1b8fc16a-79ba-4a09-b20b-6495ad20caf4"
+			"1e0c007c-fd91-48e7-af82-3d00be3d3a54" "1f5cf1f1-ee2f-4f44-bf3f-c8f260202044"
+			"2749bec2-12c0-4a18-977c-65e872464e42" "29e9b491-b543-4af1-9111-4df0e78c9a38"
+			"2c208aa3-a1fa-4059-9aea-73f4a7743e99" "2e08b4ca-784f-4be2-a027-5ba7c31268af"
+			"381969a8-70b5-4a1d-b79f-d7fdc1c5f4c3" "47457d21-20c7-4988-bd1e-9234bed6841c"
 			"4970901f-cc9d-46ad-95e9-8ed698006eba" "4e036390-dc8a-40bd-b36f-1944afe38e81"
 			"4ee913b7-1a33-4226-a929-4323783789db" "50eec6b1-98c5-4e04-81bc-9a81685dc9f9"
 			"5122e833-a809-407e-85f3-b9c989419509" "530fea0a-c950-4699-9e5f-408e30884745"
@@ -9908,7 +9936,6 @@
 			"6589f64c-5bae-4eda-b060-867971250783" "6a9ce2ac-0160-4564-8c8e-970a47f503d0"
 			"725d4337-afae-411a-b2e3-75778842464c" "7a7746c5-648e-43bb-9dae-00da21109cf1"
 			"7b53bfd1-7243-4ba8-84d9-9fbadfaa8e9c" "831716df-50f4-421a-b264-5dec0d01923c"
-			"8651afd1-cd70-42d9-86bf-26d189ce7c7d" "8d0d911c-0f1e-4812-a53b-a8957cf6361f"
 			"93a961b4-e932-40fc-959a-d0d26fce7576" "95d76a13-044e-4f1e-bddd-30d3ac18dcd6"
 			"9a82bf3d-1e64-4c57-89dc-448a2ed81049" "9ac2b69b-b15d-43f3-93ff-81a699336a09"
 			"9cf21001-9d77-485c-9ec4-cdcb89311190" "9de65a41-7144-478f-86e0-672b8eed76bf"
@@ -9920,16 +9947,15 @@
 			"b8a79a28-ace4-4b0f-83da-2b650a9a5821" "baaa2a30-8c35-4b69-8167-7b86ad9e81e6"
 			"bbd3a521-8401-419f-8e08-b494f8678667" "be1fbe05-2592-4dab-b3c1-e177bef6a90f"
 			"c579d771-021e-44fa-9c07-e40bf2151663" "c5b8c82a-7eb7-4e33-a330-61f5a360af9f"
-			"c7e6e89a-94bb-43bf-aa85-19d3c89dd491" "c8507a33-c22b-42b9-a246-2cb2feee0ffb"
-			"cab6298b-1180-4032-841b-b48e2c68b680" "ccf44c98-4f69-4090-bde3-e4ce91b71e96"
-			"cdd228b2-d961-4299-8e43-67f4fbb5c286" "d0351061-2cd0-4e33-9428-a776d421fd59"
-			"d246076e-0703-4de9-8d92-f33e64f3693e" "d5943f58-1df3-4303-a906-226f641375e7"
-			"dbe38bde-a926-4621-8722-123ccf9027cc" "df56f540-a338-4e9c-bcf9-fbf822efa673"
-			"dfd0f08a-43ca-4526-881b-b12a58015de5" "e0c61d0c-9fc9-4bf6-87d0-3e84eae5f51d"
-			"e1a5be55-79b4-47da-9968-eb8c26cc65bb" "e286247f-e10e-454d-b620-f661458e322d"
-			"e6089ab1-ccf9-466e-b8f4-55d490003138" "e67fcdff-fde1-4e36-8874-58e85637a857"
-			"e798287f-2643-4517-886a-fe6872abda90" "eb314334-8165-41ba-915c-cfee5537b3d8"
-			"eb95dd75-24a3-49fd-8eab-857dd364da6e" "ed7e64a5-3880-489c-be9f-693f77b11a69"
+			"c8507a33-c22b-42b9-a246-2cb2feee0ffb" "cab6298b-1180-4032-841b-b48e2c68b680"
+			"ccf44c98-4f69-4090-bde3-e4ce91b71e96" "cdd228b2-d961-4299-8e43-67f4fbb5c286"
+			"d0351061-2cd0-4e33-9428-a776d421fd59" "d246076e-0703-4de9-8d92-f33e64f3693e"
+			"d5943f58-1df3-4303-a906-226f641375e7" "dbe38bde-a926-4621-8722-123ccf9027cc"
+			"df56f540-a338-4e9c-bcf9-fbf822efa673" "dfd0f08a-43ca-4526-881b-b12a58015de5"
+			"e0c61d0c-9fc9-4bf6-87d0-3e84eae5f51d" "e1a5be55-79b4-47da-9968-eb8c26cc65bb"
+			"e286247f-e10e-454d-b620-f661458e322d" "e6089ab1-ccf9-466e-b8f4-55d490003138"
+			"e67fcdff-fde1-4e36-8874-58e85637a857" "e798287f-2643-4517-886a-fe6872abda90"
+			"eb314334-8165-41ba-915c-cfee5537b3d8" "eb95dd75-24a3-49fd-8eab-857dd364da6e"
 			"eef35ca9-4756-4639-839a-b62e257ccf7c" "eefb480b-cc9a-418d-8529-8834bec95b77"
 			"f115b517-b05f-4e8a-9cd7-cc6d62cf4927" "f399aef7-c7e6-4ba7-bce3-c042504b8ca9"
 			"f45f7942-9363-40b2-9d9e-bbed2561faed" "fa09c1cb-fa4b-4404-bd3a-c4dc395050cc"
