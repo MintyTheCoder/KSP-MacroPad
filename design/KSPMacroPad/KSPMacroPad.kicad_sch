@@ -5080,7 +5080,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "17609127-aab3-4719-af0c-31a491969459")
-		(property "Reference" "LED10"
+		(property "Reference" "LED7"
 			(at 94.488 186.944 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5151,7 +5151,7 @@
 		(instances
 			(project "KSPMacroPad"
 				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
-					(reference "LED10")
+					(reference "LED7")
 					(unit 1)
 				)
 			)
@@ -5688,7 +5688,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "2f5286f4-e506-46bb-bf86-6821677cf4a1")
-		(property "Reference" "LED8"
+		(property "Reference" "LED14"
 			(at 129.54 180.086 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5759,7 +5759,7 @@
 		(instances
 			(project "KSPMacroPad"
 				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
-					(reference "LED8")
+					(reference "LED14")
 					(unit 1)
 				)
 			)
@@ -6451,7 +6451,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "5c336b08-0458-4f08-9762-ca522d56d6ce")
-		(property "Reference" "LED5"
+		(property "Reference" "LED2"
 			(at 68.58 180.086 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6522,7 +6522,7 @@
 		(instances
 			(project "KSPMacroPad"
 				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
-					(reference "LED5")
+					(reference "LED2")
 					(unit 1)
 				)
 			)
@@ -6869,7 +6869,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "69ae905a-f531-41a3-8439-4273a3ecec61")
-		(property "Reference" "LED3"
+		(property "Reference" "LED9"
 			(at 114.3 148.844 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6940,7 +6940,7 @@
 		(instances
 			(project "KSPMacroPad"
 				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
-					(reference "LED3")
+					(reference "LED9")
 					(unit 1)
 				)
 			)
@@ -6957,7 +6957,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "767e7b45-ab7d-491a-bcb9-c6ac24f24260")
-		(property "Reference" "LED14"
+		(property "Reference" "LED8"
 			(at 88.392 218.186 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7028,7 +7028,7 @@
 		(instances
 			(project "KSPMacroPad"
 				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
-					(reference "LED14")
+					(reference "LED8")
 					(unit 1)
 				)
 			)
@@ -7045,7 +7045,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "7a15ae59-9ba4-4191-b03d-f28527a23487")
-		(property "Reference" "LED9"
+		(property "Reference" "LED3"
 			(at 73.66 186.944 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7116,7 +7116,7 @@
 		(instances
 			(project "KSPMacroPad"
 				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
-					(reference "LED9")
+					(reference "LED3")
 					(unit 1)
 				)
 			)
@@ -7555,7 +7555,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "97ed8b47-834f-4392-ab72-75194495eaae")
-		(property "Reference" "LED7"
+		(property "Reference" "LED10"
 			(at 109.22 180.086 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7626,7 +7626,7 @@
 		(instances
 			(project "KSPMacroPad"
 				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
-					(reference "LED7")
+					(reference "LED10")
 					(unit 1)
 				)
 			)
@@ -8030,7 +8030,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "a4c9786a-a024-4c92-bfef-373901e1b2c8")
-		(property "Reference" "LED4"
+		(property "Reference" "LED13"
 			(at 134.62 148.844 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8101,7 +8101,7 @@
 		(instances
 			(project "KSPMacroPad"
 				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
-					(reference "LED4")
+					(reference "LED13")
 					(unit 1)
 				)
 			)
@@ -8206,7 +8206,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "a83eb0ec-f9ba-4b2c-87f5-56f0a936088a")
-		(property "Reference" "LED12"
+		(property "Reference" "LED15"
 			(at 135.128 186.944 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8277,7 +8277,7 @@
 		(instances
 			(project "KSPMacroPad"
 				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
-					(reference "LED12")
+					(reference "LED15")
 					(unit 1)
 				)
 			)
@@ -8672,7 +8672,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "aece4ce7-08d9-4bdd-9893-f0c1a239103d")
-		(property "Reference" "LED15"
+		(property "Reference" "LED12"
 			(at 108.712 218.186 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -8743,7 +8743,7 @@
 		(instances
 			(project "KSPMacroPad"
 				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
-					(reference "LED15")
+					(reference "LED12")
 					(unit 1)
 				)
 			)
@@ -9220,7 +9220,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "cf19cc6c-5620-4d28-9de6-a8186772a86e")
-		(property "Reference" "LED2"
+		(property "Reference" "LED5"
 			(at 93.98 148.844 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9291,7 +9291,7 @@
 		(instances
 			(project "KSPMacroPad"
 				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
-					(reference "LED2")
+					(reference "LED5")
 					(unit 1)
 				)
 			)
@@ -9478,7 +9478,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "d8c12b49-9722-4849-ac10-472fab37e609")
-		(property "Reference" "LED13"
+		(property "Reference" "LED4"
 			(at 68.072 218.186 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9549,7 +9549,7 @@
 		(instances
 			(project "KSPMacroPad"
 				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
-					(reference "LED13")
+					(reference "LED4")
 					(unit 1)
 				)
 			)
