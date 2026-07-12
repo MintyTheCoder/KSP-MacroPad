@@ -240,7 +240,7 @@
       "internal_id": "",
       "mfg": "",
       "mpn": "",
-      "sch_revision": ""
+      "sch_revision": "5"
     },
     "layer_pairs": [],
     "layer_presets": [],
@@ -260,7 +260,52 @@
     "equivalence_files": []
   },
   "erc": {
-    "erc_exclusions": [],
+    "erc_exclusions": [
+      [
+        "pin_not_connected|1460500|1054100|d199a175-b49b-4517-a0af-13be7360af2d|00000000-0000-0000-0000-000000000000|/c63db32e-eaf1-4272-8738-6b07cc2a38cd|/c63db32e-eaf1-4272-8738-6b07cc2a38cd|",
+        ""
+      ],
+      [
+        "pin_not_connected|1460500|1104900|5d1619a5-3940-4c8c-a400-1ced4a36b0ce|00000000-0000-0000-0000-000000000000|/c63db32e-eaf1-4272-8738-6b07cc2a38cd|/c63db32e-eaf1-4272-8738-6b07cc2a38cd|",
+        ""
+      ],
+      [
+        "pin_not_connected|1498600|1282700|d199a175-b49b-4517-a0af-13be7360af2d|00000000-0000-0000-0000-000000000000|/c63db32e-eaf1-4272-8738-6b07cc2a38cd|/c63db32e-eaf1-4272-8738-6b07cc2a38cd|",
+        ""
+      ],
+      [
+        "pin_not_connected|1498600|1333500|5d1619a5-3940-4c8c-a400-1ced4a36b0ce|00000000-0000-0000-0000-000000000000|/c63db32e-eaf1-4272-8738-6b07cc2a38cd|/c63db32e-eaf1-4272-8738-6b07cc2a38cd|",
+        ""
+      ],
+      [
+        "pin_not_connected|1549400|2413000|7c9c91e0-48ee-4cef-809e-20003084eb38|00000000-0000-0000-0000-000000000000|/c63db32e-eaf1-4272-8738-6b07cc2a38cd|/c63db32e-eaf1-4272-8738-6b07cc2a38cd|",
+        ""
+      ],
+      [
+        "pin_not_connected|1689100|1054100|7c6e424a-5930-4405-9836-2e558383024a|00000000-0000-0000-0000-000000000000|/c63db32e-eaf1-4272-8738-6b07cc2a38cd|/c63db32e-eaf1-4272-8738-6b07cc2a38cd|",
+        ""
+      ],
+      [
+        "pin_not_connected|1689100|1104900|a126f1a1-b90f-4bba-8921-7d526f9bf197|00000000-0000-0000-0000-000000000000|/c63db32e-eaf1-4272-8738-6b07cc2a38cd|/c63db32e-eaf1-4272-8738-6b07cc2a38cd|",
+        ""
+      ],
+      [
+        "pin_not_connected|1727200|1282700|7c6e424a-5930-4405-9836-2e558383024a|00000000-0000-0000-0000-000000000000|/c63db32e-eaf1-4272-8738-6b07cc2a38cd|/c63db32e-eaf1-4272-8738-6b07cc2a38cd|",
+        ""
+      ],
+      [
+        "pin_not_connected|1727200|1333500|a126f1a1-b90f-4bba-8921-7d526f9bf197|00000000-0000-0000-0000-000000000000|/c63db32e-eaf1-4272-8738-6b07cc2a38cd|/c63db32e-eaf1-4272-8738-6b07cc2a38cd|",
+        ""
+      ],
+      [
+        "power_pin_not_driven|711200|1473200|2e740d0a-7aeb-46d1-946b-2e28bce25a0c|00000000-0000-0000-0000-000000000000|/c63db32e-eaf1-4272-8738-6b07cc2a38cd|/c63db32e-eaf1-4272-8738-6b07cc2a38cd|",
+        ""
+      ],
+      [
+        "power_pin_not_driven|711200|1625600|9f6d2659-d751-4f8d-8f34-c2466cc1665e|00000000-0000-0000-0000-000000000000|/c63db32e-eaf1-4272-8738-6b07cc2a38cd|/c63db32e-eaf1-4272-8738-6b07cc2a38cd|",
+        ""
+      ]
+    ],
     "meta": {
       "version": 0
     },
@@ -449,6 +494,7 @@
       "footprint_filter": "ignore",
       "footprint_link_issues": "warning",
       "four_way_junction": "ignore",
+      "global_label_dangling": "warning",
       "ground_pin_not_ground": "warning",
       "hier_label_mismatch": "error",
       "isolated_pin_label": "warning",
@@ -522,10 +568,14 @@
   },
   "pcbnew": {
     "last_paths": {
+      "gencad": "",
       "idf": "",
       "netlist": "",
       "plot": "",
-      "specctra_dsn": "",
+      "pos_files": "",
+      "specctra_dsn": "KSPMacroPad.dsn",
+      "step": "",
+      "svg": "",
       "vrml": ""
     },
     "page_layout_descr_file": ""
@@ -636,9 +686,17 @@
     "meta": {
       "version": 1
     },
+    "net_format_name": "",
     "page_layout_descr_file": "",
     "plot_directory": "",
     "reuse_designators": true,
+    "space_save_all_events": true,
+    "spice_current_sheet_as_root": false,
+    "spice_external_command": "spice \"%I\"",
+    "spice_model_current_sheet_as_root": true,
+    "spice_save_all_currents": false,
+    "spice_save_all_dissipations": false,
+    "spice_save_all_voltages": false,
     "subpart_first_id": 65,
     "subpart_id_separator": 0,
     "top_level_sheets": [
@@ -648,7 +706,7 @@
         "uuid": "c63db32e-eaf1-4272-8738-6b07cc2a38cd"
       }
     ],
-    "used_designators": "U1,SW1-18,D1-36,C1-2,S1-2,R1-14",
+    "used_designators": "U1,NT1-2,SW1-18,D1-36,C1-2,S1-2,R1-14",
     "variants": []
   },
   "sheets": [
