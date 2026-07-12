@@ -8,4 +8,4 @@ KiCad schematic and PCB files.
 - [ ] Case design
 
 ## Tools
-- KiCad 8
+- KiCad 10
