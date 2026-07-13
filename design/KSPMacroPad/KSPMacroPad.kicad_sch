@@ -5107,7 +5107,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "10329b5a-c2c6-4b84-b4c1-fdf35ed79414")
-		(property "Reference" "SW18"
+		(property "Reference" "ENCDR_RIGHT"
 			(at 161.29 97.79 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5178,7 +5178,7 @@
 		(instances
 			(project "KSPMacroPad"
 				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
-					(reference "SW18")
+					(reference "ENCDR_RIGHT")
 					(unit 1)
 				)
 			)
@@ -9768,7 +9768,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "d26ff12f-1612-4868-a086-40900b7946e3")
-		(property "Reference" "SW17"
+		(property "Reference" "ENCDR_LEFT"
 			(at 138.43 97.79 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9839,7 +9839,7 @@
 		(instances
 			(project "KSPMacroPad"
 				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
-					(reference "SW17")
+					(reference "ENCDR_LEFT")
 					(unit 1)
 				)
 			)
