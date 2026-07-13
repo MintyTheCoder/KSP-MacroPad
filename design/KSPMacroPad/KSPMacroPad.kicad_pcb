@@ -25758,8 +25758,8 @@
 		)
 	)
 	(gr_rect
-		(start 69.4625 32.8686)
-		(end 161.5375 141.6314)
+		(start 69.5 33)
+		(end 161.5 141.5)
 		(stroke
 			(width 0.05)
 			(type solid)
