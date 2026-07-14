@@ -5107,7 +5107,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "10329b5a-c2c6-4b84-b4c1-fdf35ed79414")
-		(property "Reference" "ENCDR_RIGHT"
+		(property "Reference" "ENCDR_RIGHT1"
 			(at 161.29 97.79 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5178,7 +5178,7 @@
 		(instances
 			(project "KSPMacroPad"
 				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
-					(reference "ENCDR_RIGHT")
+					(reference "ENCDR_RIGHT1")
 					(unit 1)
 				)
 			)
@@ -5399,7 +5399,7 @@
 				)
 			)
 		)
-		(property "Footprint" "footprints:SK6812MINI-E_fixed"
+		(property "Footprint" "made-for-macro:SK6812MINI-E_fixed"
 			(at 92.71 200.66 0)
 			(hide yes)
 			(show_name no)
@@ -5487,7 +5487,7 @@
 				)
 			)
 		)
-		(property "Footprint" "footprints:SK6812MINI-E_fixed"
+		(property "Footprint" "made-for-macro:SK6812MINI-E_fixed"
 			(at 72.39 162.56 0)
 			(hide yes)
 			(show_name no)
@@ -5735,7 +5735,7 @@
 				)
 			)
 		)
-		(property "Footprint" "footprints:SK6812MINI-E_fixed"
+		(property "Footprint" "made-for-macro:SK6812MINI-E_fixed"
 			(at 148.59 147.32 0)
 			(hide yes)
 			(show_name no)
@@ -6007,7 +6007,7 @@
 				)
 			)
 		)
-		(property "Footprint" "footprints:SK6812MINI-E_fixed"
+		(property "Footprint" "made-for-macro:SK6812MINI-E_fixed"
 			(at 130.81 166.37 0)
 			(hide yes)
 			(show_name no)
@@ -6095,7 +6095,7 @@
 				)
 			)
 		)
-		(property "Footprint" "footprints:SK6812MINI-E_fixed"
+		(property "Footprint" "made-for-macro:SK6812MINI-E_fixed"
 			(at 90.17 166.37 0)
 			(hide yes)
 			(show_name no)
@@ -6850,7 +6850,7 @@
 				)
 			)
 		)
-		(property "Footprint" "footprints:SK6812MINI-E_fixed"
+		(property "Footprint" "made-for-macro:SK6812MINI-E_fixed"
 			(at 69.85 166.37 0)
 			(hide yes)
 			(show_name no)
@@ -7099,7 +7099,7 @@
 				)
 			)
 		)
-		(property "Footprint" "footprints:SK6812MINI-E_fixed"
+		(property "Footprint" "made-for-macro:SK6812MINI-E_fixed"
 			(at 130.81 204.47 0)
 			(hide yes)
 			(show_name no)
@@ -7268,7 +7268,7 @@
 				)
 			)
 		)
-		(property "Footprint" "footprints:SK6812MINI-E_fixed"
+		(property "Footprint" "made-for-macro:SK6812MINI-E_fixed"
 			(at 113.03 162.56 0)
 			(hide yes)
 			(show_name no)
@@ -7356,7 +7356,7 @@
 				)
 			)
 		)
-		(property "Footprint" "footprints:SK6812MINI-E_fixed"
+		(property "Footprint" "made-for-macro:SK6812MINI-E_fixed"
 			(at 90.17 204.47 0)
 			(hide yes)
 			(show_name no)
@@ -7523,7 +7523,7 @@
 				)
 			)
 		)
-		(property "Footprint" "footprints:SK6812MINI-E_fixed"
+		(property "Footprint" "made-for-macro:SK6812MINI-E_fixed"
 			(at 72.39 200.66 0)
 			(hide yes)
 			(show_name no)
@@ -7954,7 +7954,7 @@
 				)
 			)
 		)
-		(property "Footprint" "footprints:SK6812MINI-E_fixed"
+		(property "Footprint" "made-for-macro:SK6812MINI-E_fixed"
 			(at 110.49 166.37 0)
 			(hide yes)
 			(show_name no)
@@ -8429,7 +8429,7 @@
 				)
 			)
 		)
-		(property "Footprint" "footprints:SK6812MINI-E_fixed"
+		(property "Footprint" "made-for-macro:SK6812MINI-E_fixed"
 			(at 133.35 162.56 0)
 			(hide yes)
 			(show_name no)
@@ -8517,7 +8517,7 @@
 				)
 			)
 		)
-		(property "Footprint" "footprints:SK6812MINI-E_fixed"
+		(property "Footprint" "made-for-macro:SK6812MINI-E_fixed"
 			(at 113.03 200.66 0)
 			(hide yes)
 			(show_name no)
@@ -8605,7 +8605,7 @@
 				)
 			)
 		)
-		(property "Footprint" "footprints:SK6812MINI-E_fixed"
+		(property "Footprint" "made-for-macro:SK6812MINI-E_fixed"
 			(at 133.35 200.66 0)
 			(hide yes)
 			(show_name no)
@@ -8955,7 +8955,7 @@
 				)
 			)
 		)
-		(property "Footprint" "footprints:XIAO-Generic-Hybrid-14P-2.54-21X17.8MM"
+		(property "Footprint" "Seeed-Studio-XIAO-series:XIAO-Generic-Hybrid-14P-2.54-21X17.8MM"
 			(at 144.78 45.72 0)
 			(hide yes)
 			(show_name no)
@@ -9071,7 +9071,7 @@
 				)
 			)
 		)
-		(property "Footprint" "footprints:SK6812MINI-E_fixed"
+		(property "Footprint" "made-for-macro:SK6812MINI-E_fixed"
 			(at 110.49 204.47 0)
 			(hide yes)
 			(show_name no)
@@ -9159,7 +9159,7 @@
 				)
 			)
 		)
-		(property "Footprint" "footprints:SK6812MINI-E_fixed"
+		(property "Footprint" "made-for-macro:SK6812MINI-E_fixed"
 			(at 57.15 147.32 0)
 			(hide yes)
 			(show_name no)
@@ -9349,7 +9349,7 @@
 				)
 			)
 		)
-		(property "Footprint" "footprints:SK6812MINI-E_fixed"
+		(property "Footprint" "made-for-macro:SK6812MINI-E_fixed"
 			(at 59.69 248.92 0)
 			(hide yes)
 			(show_name no)
@@ -9619,7 +9619,7 @@
 				)
 			)
 		)
-		(property "Footprint" "footprints:SK6812MINI-E_fixed"
+		(property "Footprint" "made-for-macro:SK6812MINI-E_fixed"
 			(at 92.71 162.56 0)
 			(hide yes)
 			(show_name no)
@@ -9768,7 +9768,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "d26ff12f-1612-4868-a086-40900b7946e3")
-		(property "Reference" "ENCDR_LEFT"
+		(property "Reference" "ENCDR_LEFT1"
 			(at 138.43 97.79 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -9839,7 +9839,7 @@
 		(instances
 			(project "KSPMacroPad"
 				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
-					(reference "ENCDR_LEFT")
+					(reference "ENCDR_LEFT1")
 					(unit 1)
 				)
 			)
@@ -9877,7 +9877,7 @@
 				)
 			)
 		)
-		(property "Footprint" "footprints:SK6812MINI-E_fixed"
+		(property "Footprint" "made-for-macro:SK6812MINI-E_fixed"
 			(at 69.85 204.47 0)
 			(hide yes)
 			(show_name no)
@@ -10310,7 +10310,7 @@
 				)
 			)
 		)
-		(property "Footprint" "footprints:SK6812MINI-E_fixed"
+		(property "Footprint" "made-for-macro:SK6812MINI-E_fixed"
 			(at 148.59 248.92 0)
 			(hide yes)
 			(show_name no)
@@ -10970,7 +10970,7 @@
 				)
 			)
 		)
-		(property "Footprint" "footprints:SSD1306-0.91-OLED-4pin-128x32"
+		(property "Footprint" "made-for-macro:SSD1306-0.91-OLED-4pin-128x32"
 			(at 152.4 71.12 0)
 			(hide yes)
 			(show_name no)
