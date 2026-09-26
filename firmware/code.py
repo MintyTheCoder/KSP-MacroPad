@@ -42,3 +42,18 @@ def read_key():
     if row is None or col is None:
         return None
     return KEY_MAP[row][col]
+
+
+LED_CHAIN_TO_KEY = [
+    None,
+    0x00, 0x04, 0x08, 0x0C,
+    None,
+    0x0D, 0x09, 0x05, 0x01,
+    0x0E, 0x0A, 0x06, 0x02,
+    0x03, 0x07, 0x0B, 0x0F,
+    None, None,
+]
+
+KEY_TO_LED_CHAIN = {key: i for i, key in enumerate(LED_CHAIN_TO_KEY) if key is not None}
+
+UNDERGLOW_CHAIN_INDICES = [i for i, key in enumerate(LED_CHAIN_TO_KEY) if key is None]
