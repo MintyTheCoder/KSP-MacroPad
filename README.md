@@ -9,3 +9,15 @@ The key matrix uses an ADC-based resistor ladder instead of a traditional GPIO m
 ## Branches
 - `mod` — KSP C# plugin
 - `design` — PCB schematic files, case files, firmware files
+
+#Design
+
+KiCad schematic and PCB files.
+
+## Status
+- [x] Schematic in progress
+- [X] PCB layout
+- [X] Case design
+
+## Tools
+- KiCad 10
