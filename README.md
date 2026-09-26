@@ -7,17 +7,13 @@ A custom macropad built specifically for Kerbal Space Program, developed as part
 The key matrix uses an ADC-based resistor ladder instead of a traditional GPIO matrix, a custom solution to a pin shortage on the RP2040.
 
 ## Branches
-- `mod` — KSP C# plugin
-- `design` — PCB schematic files, case files, firmware files
-
-#Design
-
-KiCad schematic and PCB files.
-
-## Status
-- [x] Schematic in progress
-- [X] PCB layout
-- [X] Case design
+- `mod` — KSP C# plugin (WIP)
+- `firmware` — firmware files (WIP)
+- `design` — PCB schematic files, case files (completed, closed, deleted)
 
 ## Tools
 - KiCad 10
+- Fusion 360
+- OpenSCAD
+- Visual Studio
+- KSP
