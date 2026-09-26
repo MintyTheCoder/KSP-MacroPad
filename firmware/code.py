@@ -9,17 +9,28 @@ LOW_MIN = 0.7
 LOW_MAX = 1.3
 HIGH_MIN = 1.6
 HIGH_MAX = 2.3
+
 DEBOUNCE_COUNT = 4
+
+COUNTS_PER_DETENT = 4
+
 
 _stable_key = None
 _stable_count = 0
 _reported_key = None
+
+_left_accum = 0
+_right_accum = 0
+
 
 row_pins = [analogio.AnalogIn(board.A0), analogio.AnalogIn(board.A1)]
 col_pins = [analogio.AnalogIn(board.A2), analogio.AnalogIn(board.A3)]
 
 left_enc = rotaryio.IncrementalEncoder(board.D10, board.D9)
 right_enc = rotaryio.IncrementalEncoder(board.D7, board.D8)
+
+_left_last = left_enc.position
+_right_last = right_enc.position
 
 KEY_MAP = [
     [0x00, 0x04, 0x08, 0x0C],
@@ -90,3 +101,22 @@ def poll_key():
 
     return None
 
+def poll_encoders():
+    global _left_last, _right_last, _left_accum, _right_accum
+
+    left_pos = left_enc.position
+    right_pos = right_enc.position
+
+    _left_accum += left_pos - _left_last
+    _right_accum += right_pos - _right_last
+
+    _left_last = left_pos
+    _right_last = right_pos
+
+    left_steps = _left_accum // COUNTS_PER_DETENT
+    right_steps = _right_accum // COUNTS_PER_DETENT
+
+    _left_accum -= left_steps * COUNTS_PER_DETENT
+    _right_accum -= right_steps * COUNTS_PER_DETENT
+
+    return left_steps, right_steps
