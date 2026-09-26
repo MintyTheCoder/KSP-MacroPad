@@ -1,6 +1,8 @@
 import board
 import analogio
 import time
+import rotaryio
+
 
 IDLE_MAX = 0.3
 LOW_MIN = 0.7
@@ -15,6 +17,9 @@ _reported_key = None
 
 row_pins = [analogio.AnalogIn(board.A0), analogio.AnalogIn(board.A1)]
 col_pins = [analogio.AnalogIn(board.A2), analogio.AnalogIn(board.A3)]
+
+left_enc = rotaryio.IncrementalEncoder(board.D10, board.D9)
+right_enc = rotaryio.IncrementalEncoder(board.D7, board.D8)
 
 KEY_MAP = [
     [0x00, 0x04, 0x08, 0x0C],
@@ -84,3 +89,4 @@ def poll_key():
             return _stable_key
 
     return None
+
