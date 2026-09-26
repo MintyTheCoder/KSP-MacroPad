@@ -3,6 +3,9 @@ import analogio
 import time
 import rotaryio
 
+import usb_cdc
+
+serial = usb_cdc.data
 
 IDLE_MAX = 0.3
 LOW_MIN = 0.7
@@ -120,3 +123,14 @@ def poll_encoders():
     _right_accum -= right_steps * COUNTS_PER_DETENT
 
     return left_steps, right_steps
+
+def send_key_packet(key_id):
+    packet = bytes([0x44, 0x01, key_id, 0x00, 0x01, 0x77])
+    serial.write(packet)
+
+def send_encoder_packet(encoder_id, steps):
+    steps = max(-32768, min(32767, steps))
+    hi = (steps >> 8) & 0xFF
+    lo = steps & 0xFF
+    packet = bytes([0x44, 0x02, encoder_id, hi, lo, 0x77])
+    serial.write(packet)
