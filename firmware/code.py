@@ -1,11 +1,17 @@
 import board
 import analogio
+import time
 
 IDLE_MAX = 0.3
 LOW_MIN = 0.7
 LOW_MAX = 1.3
 HIGH_MIN = 1.6
 HIGH_MAX = 2.3
+DEBOUNCE_COUNT = 4
+
+_stable_key = None
+_stable_count = 0
+_reported_key = None
 
 row_pins = [analogio.AnalogIn(board.A0), analogio.AnalogIn(board.A1)]
 col_pins = [analogio.AnalogIn(board.A2), analogio.AnalogIn(board.A3)]
@@ -57,3 +63,24 @@ LED_CHAIN_TO_KEY = [
 KEY_TO_LED_CHAIN = {key: i for i, key in enumerate(LED_CHAIN_TO_KEY) if key is not None}
 
 UNDERGLOW_CHAIN_INDICES = [i for i, key in enumerate(LED_CHAIN_TO_KEY) if key is None]
+
+def poll_key():
+    global _stable_key, _stable_count, _reported_key
+
+    current = read_key()
+
+    if current == _stable_key:
+        _stable_count += 1
+    else:
+        _stable_key = current
+        _stable_count = 1
+
+    if _stable_count < DEBOUNCE_COUNT:
+        return None
+
+    if _stable_key != _reported_key:
+        _reported_key = _stable_key
+        if _stable_key is not None:
+            return _stable_key
+
+    return None
