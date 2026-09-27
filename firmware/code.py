@@ -9,6 +9,8 @@ import neopixel
 
 serial = usb_cdc.data
 
+encoder_mode = 1
+
 IDLE_MAX = 0.3
 LOW_MIN = 0.7
 LOW_MAX = 1.3
@@ -20,7 +22,6 @@ DEBOUNCE_COUNT = 4
 COUNTS_PER_DETENT = 4
 
 NUM_LEDS = 20
-
 
 _stable_key = None
 _stable_count = 0
@@ -37,8 +38,6 @@ left_enc = rotaryio.IncrementalEncoder(board.D10, board.D9)
 right_enc = rotaryio.IncrementalEncoder(board.D7, board.D8)
 
 pixels = neopixel.NeoPixel(board.D6, NUM_LEDS, auto_write=False)
-
-
 
 _left_last = left_enc.position
 _right_last = right_enc.position
@@ -258,3 +257,24 @@ def apply_led_update(led_id, state, data):
         return
 
     pixels.show()
+
+while True:
+    key = poll_key()
+    if key is not None:
+        send_key_packet(key)
+        if key == 0x0B:
+            encoder_mode = 1 if encoder_mode == 2 else 2
+        elif key == 0x0E:
+            encoder_mode = 1 if encoder_mode == 3 else 3
+
+    left_steps, right_steps = poll_encoders()
+    if left_steps != 0:
+        send_encoder_packet((encoder_mode << 4) | 0x1, left_steps)
+    if right_steps != 0:
+        send_encoder_packet((encoder_mode << 4) | 0x2, right_steps)
+
+    led_packet = read_led_packet()
+    if led_packet is not None:
+        apply_led_update(*led_packet)
+
+    time.sleep(0.01)
