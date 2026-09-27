@@ -1,35 +1,40 @@
+# ============================================================================
+# KSP MacroPad — Firmware (CircuitPython)
+# Version: 0.1.0
+# ============================================================================
+
+import time
+
 import board
 import analogio
-import time
 import rotaryio
-
-import usb_cdc
-from led_states import LEDStates
 import neopixel
+import usb_cdc
+
+from led_states import LEDStates
 
 serial = usb_cdc.data
 
-encoder_mode = 1
 
+# ----------------------------------------------------------------------------
+# Constants
+# ----------------------------------------------------------------------------
+
+# ADC voltage bands used to classify each row/col line (idle / low / high)
 IDLE_MAX = 0.3
 LOW_MIN = 0.7
 LOW_MAX = 1.3
 HIGH_MIN = 1.6
 HIGH_MAX = 2.3
 
-DEBOUNCE_COUNT = 4
+DEBOUNCE_COUNT = 4      # consecutive stable reads required before a key registers
+COUNTS_PER_DETENT = 4   # raw encoder counts per physical detent click
+NUM_LEDS = 20           # total pixels in the NeoPixel chain
 
-COUNTS_PER_DETENT = 4
 
-NUM_LEDS = 20
-
-_stable_key = None
-_stable_count = 0
-_reported_key = None
-
-_left_accum = 0
-_right_accum = 0
-
+# ----------------------------------------------------------------------------
+# Hardware setup
+# ----------------------------------------------------------------------------
 
 row_pins = [analogio.AnalogIn(board.A0), analogio.AnalogIn(board.A1)]
 col_pins = [analogio.AnalogIn(board.A2), analogio.AnalogIn(board.A3)]
@@ -39,11 +44,29 @@ right_enc = rotaryio.IncrementalEncoder(board.D7, board.D8)
 
 pixels = neopixel.NeoPixel(board.D6, NUM_LEDS, auto_write=False)
 
+
+# ----------------------------------------------------------------------------
+# Runtime state
+# ----------------------------------------------------------------------------
+
+encoder_mode = 1   # 1 = normal, 2 = precision input, 3 = aux mode
+
+_stable_key = None
+_stable_count = 0
+_reported_key = None
+
+_left_accum = 0
+_right_accum = 0
 _left_last = left_enc.position
 _right_last = right_enc.position
 
 _in_buf = bytearray()
 
+
+# ----------------------------------------------------------------------------
+# Key matrix mapping
+# ----------------------------------------------------------------------------
+# KEY_MAP[row][col] -> key_id byte sent to the mod
 KEY_MAP = [
     [0x00, 0x04, 0x08, 0x0C],
     [0x01, 0x05, 0x09, 0x0D],
@@ -51,33 +74,12 @@ KEY_MAP = [
     [0x03, 0x07, 0x0B, 0x0F],
 ]
 
-def read_voltage(pin):
-    return pin.value / 65535 * 3.3
 
-def classify(voltage):
-    if voltage < IDLE_MAX:
-        return None
-    if LOW_MIN <= voltage <= LOW_MAX:
-        return 0
-    if HIGH_MIN <= voltage <= HIGH_MAX:
-        return 1
-    return None
-
-def find_index(pins):
-    for pin_idx, pin in enumerate(pins):
-        level = classify(read_voltage(pin))
-        if level is not None:
-            return pin_idx * 2 + level
-    return None
-
-def read_key():
-    row = find_index(row_pins)
-    col = find_index(col_pins)
-    if row is None or col is None:
-        return None
-    return KEY_MAP[row][col]
-
-
+# ----------------------------------------------------------------------------
+# LED chain mapping
+# ----------------------------------------------------------------------------
+# Physical NeoPixel chain order -> key_id it lights up for.
+# None = underglow pixel (not tied to a specific key).
 LED_CHAIN_TO_KEY = [
     None,
     0x00, 0x04, 0x08, 0x0C,
@@ -88,6 +90,18 @@ LED_CHAIN_TO_KEY = [
     None, None,
 ]
 
+# Reverse lookup: key_id -> chain index
+KEY_TO_LED_CHAIN = {key: i for i, key in enumerate(LED_CHAIN_TO_KEY) if key is not None}
+
+# Chain indices reserved for underglow (not mapped to any key)
+UNDERGLOW_CHAIN_INDICES = [i for i, key in enumerate(LED_CHAIN_TO_KEY) if key is None]
+
+
+# ----------------------------------------------------------------------------
+# LED state -> color table
+# ----------------------------------------------------------------------------
+# Keyed by (led_id, state). led_id 0x10-0x13 (underglow zones) all share the
+# 0x10 entries — see apply_led_update's lookup_id collapsing.
 STATE_COLORS = {
     (0x00, LEDStates.LAUNCH_IDLE): (0, 0, 0),
     (0x00, LEDStates.LAUNCH_EXECUTING): (0, 100, 255),
@@ -171,11 +185,45 @@ STATE_COLORS = {
     (0x10, LEDStates.UNDERGLOW_COMMS_LOST): (255, 0, 0),
 }
 
-KEY_TO_LED_CHAIN = {key: i for i, key in enumerate(LED_CHAIN_TO_KEY) if key is not None}
 
-UNDERGLOW_CHAIN_INDICES = [i for i, key in enumerate(LED_CHAIN_TO_KEY) if key is None]
+# ----------------------------------------------------------------------------
+# Key matrix scanning
+# ----------------------------------------------------------------------------
+
+def read_voltage(pin):
+    return pin.value / 65535 * 3.3
+
+
+def classify(voltage):
+    """Map a raw voltage reading to an idle/low/high band, or None if idle."""
+    if voltage < IDLE_MAX:
+        return None
+    if LOW_MIN <= voltage <= LOW_MAX:
+        return 0
+    if HIGH_MIN <= voltage <= HIGH_MAX:
+        return 1
+    return None
+
+
+def find_index(pins):
+    """Return the (line_index * 2 + band) for whichever pin is active, else None."""
+    for pin_idx, pin in enumerate(pins):
+        level = classify(read_voltage(pin))
+        if level is not None:
+            return pin_idx * 2 + level
+    return None
+
+
+def read_key():
+    row = find_index(row_pins)
+    col = find_index(col_pins)
+    if row is None or col is None:
+        return None
+    return KEY_MAP[row][col]
+
 
 def poll_key():
+    """Debounced key read. Returns a key_id only on a new, stable press."""
     global _stable_key, _stable_count, _reported_key
 
     current = read_key()
@@ -196,7 +244,13 @@ def poll_key():
 
     return None
 
+
+# ----------------------------------------------------------------------------
+# Encoder polling
+# ----------------------------------------------------------------------------
+
 def poll_encoders():
+    """Accumulate raw encoder counts and emit whole detent steps."""
     global _left_last, _right_last, _left_accum, _right_accum
 
     left_pos = left_enc.position
@@ -216,9 +270,16 @@ def poll_encoders():
 
     return left_steps, right_steps
 
+
+# ----------------------------------------------------------------------------
+# Serial protocol — outbound (pad -> mod)
+# ----------------------------------------------------------------------------
+# Packet format: [0x44, msg_type, id, data_hi, data_lo, 0x77]
+
 def send_key_packet(key_id):
     packet = bytes([0x44, 0x01, key_id, 0x00, 0x01, 0x77])
     serial.write(packet)
+
 
 def send_encoder_packet(encoder_id, steps):
     steps = max(-32768, min(32767, steps))
@@ -227,7 +288,14 @@ def send_encoder_packet(encoder_id, steps):
     packet = bytes([0x44, 0x02, encoder_id, hi, lo, 0x77])
     serial.write(packet)
 
+
+# ----------------------------------------------------------------------------
+# Serial protocol — inbound (mod -> pad)
+# ----------------------------------------------------------------------------
+# Packet format: [0x77, led_id, state, data, 0x44]
+
 def read_led_packet():
+    """Pull one complete LED packet off the serial buffer, if available."""
     global _in_buf
     if serial.in_waiting > 0:
         _in_buf += serial.read(serial.in_waiting)
@@ -245,7 +313,9 @@ def read_led_packet():
 
     return None
 
+
 def apply_led_update(led_id, state, data):
+    """Resolve an LED packet to a color and write it to the pixel chain."""
     lookup_id = 0x10 if 0x10 <= led_id <= 0x13 else led_id
     color = STATE_COLORS.get((lookup_id, state), (0, 0, 0))
 
@@ -258,10 +328,17 @@ def apply_led_update(led_id, state, data):
 
     pixels.show()
 
+
+# ----------------------------------------------------------------------------
+# Main loop
+# ----------------------------------------------------------------------------
+
 while True:
     key = poll_key()
     if key is not None:
         send_key_packet(key)
+        # 0x0B / 0x0E toggle their own mode on/off (2 or 3), returning to
+        # mode 1 on a second press.
         if key == 0x0B:
             encoder_mode = 1 if encoder_mode == 2 else 2
         elif key == 0x0E:
