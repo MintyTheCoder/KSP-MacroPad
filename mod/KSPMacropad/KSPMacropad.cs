@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO.Ports;
 using System.Threading;
 using UnityEngine;
+using KSP.UI.Screens; // StageManager - namespace unverified, no KSP install to check against
 
 namespace KSPMacropad
 {
@@ -55,6 +56,9 @@ namespace KSPMacropad
         private int lastSentThrottle = -1; // -1 = never sent yet, forces the first send
         private int lastSentWarp = -1;
 
+        private bool suicideBurnArmed = false;
+        private bool resourceMonitorPanelOpen = false;
+
         void Start()
         {
             Debug.Log("[KSPMacropad] KSP Macropad loaded.");
@@ -91,56 +95,56 @@ namespace KSPMacropad
                         {
                             case 0x00:
                                 Debug.Log("[KSPMacropad] KEY PRESSED: LAUNCH SEQUENCE");
-                                //initialize launch sequence
+                                DoLaunchSequence();
                                 break;
                             case 0x01:
                                 Debug.Log("[KSPMacropad] KEY PRESSED: AUTO GRAVITY TURN");
-                                //initiate gravity turn
+                                //initiate gravity turn - HARD: continuous closed-loop pitch control, not yet implemented
                                 break;
 
                             case 0x02:
                                 Debug.Log("[KSPMacropad] KEY PRESSED: CIRCULARIZE");
-                                //initiate circularization
+                                //initiate circularization - HARD: maneuver node burn vector math, not yet implemented
                                 break;
 
                             case 0x03:
                                 Debug.Log("[KSPMacropad] KEY PRESSED: TIME ACCELERATION TO NXT BURN");
-                                //acceklerate time to next burn
+                                DoTimeAccelToNextEvent();
                                 break;
 
                             case 0x04:
                                 Debug.Log("[KSPMacropad] KEY PRESSED: INTERCEPT CALCULATION");
-                                //calculate intercept trajectory for target
+                                //calculate intercept trajectory - HARD: not yet implemented
                                 break;
 
                             case 0x05:
                                 Debug.Log("[KSPMacropad] KEY PRESSED: ORBIT SYNC");
-                                //sync orbit with target
+                                //sync orbit with target - HARD: not yet implemented
                                 break;
 
                             case 0x06:
                                 Debug.Log("[KSPMacropad] KEY PRESSED: RENDEZVOUS PREPARATION");
-                                //prepare for rendezvous with target
+                                //prepare for rendezvous - HARD: not yet implemented
                                 break;
 
                             case 0x07:
                                 Debug.Log("[KSPMacropad] KEY PRESSED: DEORBIT BURN");
-                                //initiate deorbit burn
+                                //initiate deorbit burn - HARD: maneuver node burn vector math, not yet implemented
                                 break;
 
                             case 0x08:
                                 Debug.Log("[KSPMacropad] KEY PRESSED: DOCKING PREP");
-                                //prepare for docking with target vessel
+                                DoDockingPrep();
                                 break;
 
                             case 0x09:
                                 Debug.Log("[KSPMacropad] KEY PRESSED: LANDING PREP");
-                                //prepare to land on target body
+                                DoLandingPrep();
                                 break;
 
                             case 0x0A:
                                 Debug.Log("[KSPMacropad] KEY PRESSED: SUICIDE BURN ARM");
-                                //prepare for suicide burn
+                                DoSuicideBurnArm();
                                 break;
 
                             case 0x0B:
@@ -150,12 +154,12 @@ namespace KSPMacropad
 
                             case 0x0C:
                                 Debug.Log("[KSPMacropad] KEY PRESSED: TRANSMIT SCIENCE");
-                                //transmit all science on board
+                                DoTransmitScience();
                                 break;
 
                             case 0x0D:
                                 Debug.Log("[KSPMacropad] KEY PRESSED: RESOURCE MONITOR MODE");
-                                //switch to resource monitor
+                                DoResourceMonitorToggle();
                                 break;
 
                             case 0x0E:
@@ -439,6 +443,181 @@ namespace KSPMacropad
             }
 
             return any ? lowest : 1.0;
+        }
+
+        // ------------------------------------------------------------------
+        // Macro bodies - the "simple" batch: one-shot action-group toggles,
+        // no maneuver-node vector math or continuous closed-loop control.
+        // NONE OF THIS IS COMPILED OR TESTED against a real KSP install -
+        // written from known KSP modding API patterns, but exact method/
+        // namespace names (StageManager vs Staging, Autopilot call order,
+        // science API specifics) should be checked once KSP is on hand.
+        // ------------------------------------------------------------------
+
+        void DoLaunchSequence()
+        {
+            Vessel vessel = FlightGlobals.ActiveVessel;
+            if (vessel == null)
+                return;
+
+            FlightInputHandler.state.mainThrottle = 1f;
+
+            if (!vessel.ActionGroups[KSPActionGroup.SAS])
+                vessel.ActionGroups.ToggleGroup(KSPActionGroup.SAS);
+
+            StageManager.ActivateNextStage(); // UNVERIFIED: class name may be `Staging` in some KSP versions
+
+            SetLEDState(0x00, LEDStates.LAUNCH_EXECUTING, 0x00);
+            // LAUNCH_COMPLETE is never set here - "launch complete" isn't a
+            // single event, it needs a definition (reached target apoapsis?
+            // left the atmosphere?) that hasn't been decided yet.
+        }
+
+        // Finds the earliest of (next maneuver node UT, next SOI-change UT)
+        // and warps to it. TimeWarp.WarpTo() auto-stops on arrival by itself,
+        // so no separate "stop warping" call is needed. No burn-direction
+        // risk here since this only controls time, not a burn vector.
+        void DoTimeAccelToNextEvent()
+        {
+            Vessel vessel = FlightGlobals.ActiveVessel;
+            if (vessel == null)
+                return;
+
+            double currentUT = Planetarium.GetUniversalTime();
+            double? nextEventUT = null;
+
+            if (vessel.patchedConicSolver != null && vessel.patchedConicSolver.maneuverNodes.Count > 0)
+                nextEventUT = vessel.patchedConicSolver.maneuverNodes[0].UT;
+
+            if (vessel.orbit.UTsoi > currentUT)
+            {
+                if (!nextEventUT.HasValue || vessel.orbit.UTsoi < nextEventUT.Value)
+                    nextEventUT = vessel.orbit.UTsoi;
+            }
+
+            if (nextEventUT.HasValue && nextEventUT.Value > currentUT)
+            {
+                SetLEDState(0x03, LEDStates.TIMEACCEL_WARPING, 0x00);
+                TimeWarp.fetch.WarpTo(nextEventUT.Value);
+                // KNOWN GAP: nothing currently resets this LED back to IDLE
+                // once the warp completes - CheckLEDStates doesn't watch
+                // this key yet. Will show WARPING until something else
+                // changes it.
+            }
+            else
+            {
+                SetLEDState(0x03, LEDStates.TIMEACCEL_UNAVAILABLE, 0x00);
+            }
+        }
+
+        void DoDockingPrep()
+        {
+            Vessel vessel = FlightGlobals.ActiveVessel;
+            if (vessel == null)
+                return;
+
+            if (!vessel.ActionGroups[KSPActionGroup.RCS])
+                vessel.ActionGroups.ToggleGroup(KSPActionGroup.RCS);
+
+            if (!vessel.ActionGroups[KSPActionGroup.SAS])
+                vessel.ActionGroups.ToggleGroup(KSPActionGroup.SAS);
+
+            if (FlightGlobals.fetch.VesselTarget != null)
+            {
+                vessel.Autopilot.Enabled = true;
+                vessel.Autopilot.SetMode(VesselAutopilot.AutopilotMode.Target);
+                SetLEDState(0x08, LEDStates.DOCK_TARGET_ACQUIRED, 0x00);
+            }
+            else
+            {
+                SetLEDState(0x08, LEDStates.DOCK_ACTIVE, 0x00);
+            }
+            // DOCK_READY is not set here - needs a distance/closing-velocity
+            // check against the target, which belongs in a continuous
+            // monitor (CheckLEDStates), not this one-shot key handler.
+        }
+
+        void DoLandingPrep()
+        {
+            Vessel vessel = FlightGlobals.ActiveVessel;
+            if (vessel == null)
+                return;
+
+            if (!vessel.ActionGroups[KSPActionGroup.SAS])
+                vessel.ActionGroups.ToggleGroup(KSPActionGroup.SAS);
+
+            if (!vessel.ActionGroups[KSPActionGroup.RCS])
+                vessel.ActionGroups.ToggleGroup(KSPActionGroup.RCS);
+
+            if (!vessel.ActionGroups[KSPActionGroup.Gear])
+                vessel.ActionGroups.ToggleGroup(KSPActionGroup.Gear);
+
+            FlightInputHandler.state.mainThrottle = 0f;
+
+            SetLEDState(0x09, LEDStates.LANDING_CONFIGURING, 0x00);
+            // LANDING_COMPLETE isn't set here - that's `vessel.Landed`
+            // going true, which is a continuous-check concern, not a
+            // one-shot response to this key.
+        }
+
+        // Only the ARM step - sets the flag and LED. The actual continuous
+        // TWR/altitude/velocity monitor and auto-fire-at-trigger-point logic
+        // (SUICIDEBURN_IMMINENT / SUICIDEBURN_BURNING) is real flight-
+        // dynamics math (estimating stopping distance from current
+        // velocity/TWR/altitude) - that's part of the "hard" batch, not
+        // implemented here. suicideBurnArmed exists so that monitor has
+        // something to check once it's written.
+        void DoSuicideBurnArm()
+        {
+            suicideBurnArmed = true;
+            SetLEDState(0x0A, LEDStates.SUICIDEBURN_ARMED, 0x00);
+        }
+
+        // UNVERIFIED: exact IScienceDataContainer/IScienceDataTransmitter
+        // API shape (method names, whether DumpData is the right call here)
+        // needs checking against the real KSP assemblies.
+        void DoTransmitScience()
+        {
+            Vessel vessel = FlightGlobals.ActiveVessel;
+            if (vessel == null)
+                return;
+
+            List<IScienceDataTransmitter> transmitters = vessel.FindPartModulesImplementing<IScienceDataTransmitter>();
+            if (transmitters.Count == 0)
+            {
+                SetLEDState(0x0C, LEDStates.SCIENCE_UNAVAILABLE, 0x00);
+                return;
+            }
+
+            bool anyData = false;
+            foreach (var container in vessel.FindPartModulesImplementing<IScienceDataContainer>())
+            {
+                ScienceData[] data = container.GetData();
+                if (data.Length == 0)
+                    continue;
+
+                anyData = true;
+                foreach (var d in data)
+                    transmitters[0].TransmitData(new List<ScienceData> { d });
+            }
+
+            // SCIENCE_COMPLETE isn't set here - transmission finishes
+            // asynchronously in-game, which would need a completion
+            // callback/event, not something known at the moment of the
+            // keypress.
+            SetLEDState(0x0C, anyData ? LEDStates.SCIENCE_TRANSMITTING : LEDStates.SCIENCE_UNAVAILABLE, 0x00);
+        }
+
+        // No real companion-app IPC exists yet (tech stack still undecided
+        // per the project doc), so this only flips a local flag - nothing
+        // actually opens/closes on screen until that channel is built.
+        // RESOURCE MONITOR's own LED is already driven continuously by
+        // CheckLEDStates from real resource levels, independent of this.
+        void DoResourceMonitorToggle()
+        {
+            resourceMonitorPanelOpen = !resourceMonitorPanelOpen;
+            Debug.Log("[KSPMacropad] Resource monitor panel " +
+                (resourceMonitorPanelOpen ? "OPEN (not yet wired to companion app)" : "CLOSED"));
         }
 
     }
