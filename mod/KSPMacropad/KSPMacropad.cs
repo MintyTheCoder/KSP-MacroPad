@@ -44,16 +44,22 @@ namespace KSPMacropad
         // Reserved inbound-to-pad IDs outside the key (0x00-0x0F) / underglow
         // (0x10-0x13) ranges - same 5-byte frame as UpdateLED, just new
         // meanings. Must match firmware's HEARTBEAT_ID/THROTTLE_TELEMETRY_ID/
-        // WARP_TELEMETRY_ID exactly.
+        // WARP_TELEMETRY_ID/*_MACRO_ID/QUEUE_LENGTH_ID exactly.
         private const byte HEARTBEAT_ID = 0x14;
         private const byte THROTTLE_TELEMETRY_ID = 0x15;
         private const byte WARP_TELEMETRY_ID = 0x16;
+        private const byte ACTIVE_MACRO_TELEMETRY_ID = 0x17; // data = key id of the flying macro, NO_MACRO if none
+        private const byte NEXT_MACRO_TELEMETRY_ID = 0x18;   // data = key id at the head of the queue, NO_MACRO if empty
+        private const byte QUEUE_LENGTH_TELEMETRY_ID = 0x19; // data = number of queued macros (not counting the active one)
 
         private const float HEARTBEAT_INTERVAL = 1.0f; // seconds; must stay well under firmware's HEARTBEAT_TIMEOUT (3.0s)
 
         private float lastHeartbeatTime = 0f;
         private int lastSentThrottle = -1; // -1 = never sent yet, forces the first send
         private int lastSentWarp = -1;
+        private int lastSentActiveMacro = -1;
+        private int lastSentNextMacro = -1;
+        private int lastSentQueueLength = -1;
 
         private bool suicideBurnArmed = false;
         private bool resourceMonitorPanelOpen = false;
@@ -291,6 +297,7 @@ namespace KSPMacropad
 
             SendHeartbeat();
             SendTelemetry();
+            SendMacroQueueTelemetry();
             CheckLEDStates();
             TickAutopilot();
             TickNodeJob();
@@ -331,6 +338,33 @@ namespace KSPMacropad
             {
                 lastSentWarp = warpIndex;
                 UpdateLED(WARP_TELEMETRY_ID, 0x00, (byte)warpIndex);
+            }
+        }
+
+        // Active macro / next queued macro / queue length for the pad's
+        // OLED. Same diff-then-send pattern as SendTelemetry, but kept out
+        // of it since the queue exists even with no active vessel.
+        void SendMacroQueueTelemetry()
+        {
+            int active = activeMacroKey;
+            if (active != lastSentActiveMacro)
+            {
+                lastSentActiveMacro = active;
+                UpdateLED(ACTIVE_MACRO_TELEMETRY_ID, 0x00, (byte)active);
+            }
+
+            int next = macroQueue.Count > 0 ? macroQueue[0] : NO_MACRO;
+            if (next != lastSentNextMacro)
+            {
+                lastSentNextMacro = next;
+                UpdateLED(NEXT_MACRO_TELEMETRY_ID, 0x00, (byte)next);
+            }
+
+            int length = Math.Min(macroQueue.Count, 255);
+            if (length != lastSentQueueLength)
+            {
+                lastSentQueueLength = length;
+                UpdateLED(QUEUE_LENGTH_TELEMETRY_ID, 0x00, (byte)length);
             }
         }
 
