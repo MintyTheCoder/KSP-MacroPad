@@ -37,6 +37,7 @@ namespace KSPMacropad
         }
 
         private byte[] ledStates = new byte[TrackedKeyIds.Length + 1];
+        private byte[] ledData = new byte[TrackedKeyIds.Length + 1];
 
         private bool running = false;
 
@@ -76,6 +77,54 @@ namespace KSPMacropad
         private double autopilotTransferTime;
         private double autopilotDeadlineUT; // abort if we blow past this without reaching the destination SOI
         private const double AUTOPILOT_DV_EPSILON = 0.1; // m/s - burn considered "done" below this
+
+        // Shared single-node burn executor used by CIRCULARIZE, DEORBIT,
+        // INTERCEPT and ORBIT SYNC (see StartNodeJob/TickNodeJob).
+        private enum NodeJobPhase { None, Warping, Burning }
+        private NodeJobPhase nodeJobPhase = NodeJobPhase.None;
+        private ManeuverNode nodeJobNode;
+        private byte nodeJobKeyId;
+        private byte nodeJobIdleState;
+        private byte nodeJobBurningState;
+        private Action nodeJobOnComplete;
+
+        // Burn-completion tracking for ExecuteNodeBurn (one burn at a time).
+        private ManeuverNode activeBurnNode;
+        private Vector3d activeBurnStartDir;
+
+        private const double NODE_WARP_LEAD_SECONDS = 30.0;  // stop warping this long before a node so SAS can align
+        private const double NODE_ALIGN_TOLERANCE_DEG = 5.0; // no throttle until pointed within this of the burn vector
+        private const double NODE_TAPER_DV = 10.0;           // m/s remaining below which throttle scales down
+        private const double NODE_MIN_LEAD_SECONDS = 60.0;   // never plan a node closer than this to now
+
+        private ManeuverNode interceptPlannedNode;
+
+        private const double DEORBIT_ATMOSPHERE_FRACTION = 0.5; // target periapsis at this fraction of atmosphere depth
+
+        private const int INTERCEPT_DEPARTURE_SAMPLES = 60;
+        private const int INTERCEPT_TOF_SAMPLES = 15;
+        private const double INTERCEPT_TOF_MIN_FRACTION = 0.3;
+        private const double INTERCEPT_TOF_MAX_FRACTION = 1.5;
+        private const double INTERCEPT_MAX_WINDOW_ORBITS = 5.0;
+        private const double INTERCEPT_SAFE_ALTITUDE_MARGIN = 10000.0; // m above surface/atmosphere a transfer may dip to
+
+        private const double ORBITSYNC_MIN_REL_INCLINATION_DEG = 0.05;
+        private const int ORBITSYNC_CROSSING_SAMPLES = 180;
+
+        private bool rendezvousActive = false;
+        private bool rendezvousPrevPrecisionMode = false;
+        private const double RENDEZVOUS_IN_RANGE_METERS = 200.0;  // placeholder
+        private const double RENDEZVOUS_MAX_CLOSING_MS = 50.0;    // closing speed that maps to data byte 255
+
+        private bool agtActive = false;
+        private const double AGT_START_ALTITUDE = 10000.0;
+        private const double AGT_END_ALTITUDE = 45000.0;
+        private const double AGT_START_PITCH_DEG = 90.0;
+        private const double AGT_END_PITCH_DEG = 45.0;
+        private const double AGT_TARGET_APOAPSIS = 80000.0; // placeholder - cut throttle and hand off to CIRCULARIZE here
+        private const double AGT_MAX_Q_KPA = 20.0;          // placeholder - above this, stay close to surface prograde
+        private const double AGT_MAX_AOA_DEG = 5.0;
+        private const double AGT_MIN_SRF_SPEED_FOR_AOA = 50.0; // surface prograde is too noisy to follow below this
 
         void Start()
         {
@@ -117,12 +166,12 @@ namespace KSPMacropad
                                 break;
                             case 0x01:
                                 Debug.Log("[KSPMacropad] KEY PRESSED: AUTO GRAVITY TURN");
-                                //initiate gravity turn - HARD: continuous closed-loop pitch control, not yet implemented
+                                DoAutoGravityTurn();
                                 break;
 
                             case 0x02:
                                 Debug.Log("[KSPMacropad] KEY PRESSED: CIRCULARIZE");
-                                //initiate circularization - HARD: maneuver node burn vector math, not yet implemented
+                                DoCircularize();
                                 break;
 
                             case 0x03:
@@ -132,22 +181,22 @@ namespace KSPMacropad
 
                             case 0x04:
                                 Debug.Log("[KSPMacropad] KEY PRESSED: INTERCEPT CALCULATION");
-                                //calculate intercept trajectory - HARD: not yet implemented
+                                DoInterceptCalc();
                                 break;
 
                             case 0x05:
                                 Debug.Log("[KSPMacropad] KEY PRESSED: ORBIT SYNC");
-                                //sync orbit with target - HARD: not yet implemented
+                                DoOrbitSync();
                                 break;
 
                             case 0x06:
                                 Debug.Log("[KSPMacropad] KEY PRESSED: RENDEZVOUS PREPARATION");
-                                //prepare for rendezvous - HARD: not yet implemented
+                                DoRendezvousPrep();
                                 break;
 
                             case 0x07:
                                 Debug.Log("[KSPMacropad] KEY PRESSED: DEORBIT BURN");
-                                //initiate deorbit burn - HARD: maneuver node burn vector math, not yet implemented
+                                DoDeorbitBurn();
                                 break;
 
                             case 0x08:
@@ -237,6 +286,9 @@ namespace KSPMacropad
             SendTelemetry();
             CheckLEDStates();
             TickAutopilot();
+            TickNodeJob();
+            TickGravityTurn();
+            TickRendezvous();
         }
 
         // Sent on a fixed interval regardless of state change (the one
@@ -339,6 +391,7 @@ namespace KSPMacropad
         void InitializeLEDs()
         {
             Array.Clear(ledStates, 0, ledStates.Length);
+            Array.Clear(ledData, 0, ledData.Length);
 
             // Iterates the real tracked-key list (not a raw 0x00-0x0D range),
             // since 0x0B has no LED states and 0x0F (AUTOPILOT) does.
@@ -350,15 +403,17 @@ namespace KSPMacropad
             UpdateUnderglow(0x00, 0x00);
         }
 
-        // Only sends an update when the resolved state actually differs from
-        // what was last sent for that key - same "diff, don't spam" pattern
-        // as the rest of the LED protocol.
+        // Only sends an update when the state or data byte actually differs
+        // from what was last sent for that key - same "diff, don't spam"
+        // pattern as the rest of the LED protocol. Data is diffed too since
+        // RENDEZVOUS PREP streams closing velocity through it.
         void SetLEDState(byte keyId, byte state, byte data)
         {
             int idx = KeyIdToStateIndex[keyId];
-            if (ledStates[idx] != state)
+            if (ledStates[idx] != state || ledData[idx] != data)
             {
                 ledStates[idx] = state;
+                ledData[idx] = data;
                 UpdateLED(keyId, state, data);
             }
         }
@@ -649,55 +704,34 @@ namespace KSPMacropad
         // Revisit once either a 4th encoder mode or the companion app's
         // destination picker exists.
         //
-        // Destination timing/magnitude are now solved for real via
-        // FindBestTransferWindow()'s Lambert search below, rather than
-        // assumed - see that method for what it actually searches.
+        // Departure/arrival timing and magnitudes come from
+        // FindBestTransferWindow()'s Lambert search below.
         //
-        // Known remaining simplifying assumptions (first-pass, not tuned/
-        // verified in-game):
-        //   - ejection and capture burns are executed prograde/retrograde
-        //     only. The true hyperbolic-excess-velocity vector the Lambert
-        //     solve produces generally isn't purely prograde at the burn
-        //     point - it can have a real radial/normal component. Using
-        //     only the magnitude (not the full 3D direction) of vInf is a
-        //     real source of residual pointing error this build doesn't
-        //     correct for.
-        //   - no SOI-transit-time offset: a real patched-conic plan burns
-        //     somewhat before the nominal departure UT so the vessel is
-        //     actually at that velocity by the time it crosses the SOI
-        //     boundary. This build burns AT the found departure UT instead.
+        // Known simplifying assumptions (not tuned/verified in-game):
+        //   - the ejection burn is prograde only. The hyperbolic-excess
+        //     vector the Lambert solve produces generally has a radial/
+        //     normal component at the burn point; only its magnitude is
+        //     used, which leaves residual pointing error.
+        //   - no SOI-transit-time offset: the burn happens AT the found
+        //     departure UT rather than early enough to be at that velocity
+        //     when crossing the SOI boundary.
         //   - the search grid (vessel's own periapsis passages x a handful
-        //     of time-of-flight samples per passage) is coarse, not a true
-        //     continuous optimum - it's a reasonable window, not the
-        //     cheapest possible one.
-        //   - mid-course correction only nulls relative inclination between
-        //     the vessel's transfer orbit and the destination's orbital
-        //     plane, not a full aim-point correction for the pointing error
-        //     from the two points above.
-        //   - capture parking altitude is a flat +100km over the destination
-        //     body's radius, not anything the player chose.
-        //   - burn execution is full-throttle with no tapering near the end
-        //     (node.GetBurnVector()'s magnitude is what's checked against
-        //     AUTOPILOT_DV_EPSILON), so a high-TWR craft can overshoot.
+        //     of time-of-flight samples per passage) is coarse - a
+        //     reasonable window, not the cheapest possible one.
+        //   - mid-course correction only matches the destination's orbital
+        //     plane, not a full aim-point correction for the two points
+        //     above.
+        //   - the feasibility check budgets capture into a +100km parking
+        //     orbit; the actual capture burn circularizes at whatever
+        //     periapsis the vessel arrives with.
         //   - no Principia (n-body) detection - doc already flags AUTOPILOT
         //     as broken under Principia; not checked for here.
         //   - Coordinate frame for FindBestTransferWindow's vector math:
-        //     checked against the KSP API docs. getRelativePositionAtUT is
-        //     documented as "all Vector3d's returned by Orbit class
-        //     functions have their y and z axes flipped" - i.e. every Orbit
-        //     method (including getOrbitalVelocityAtUT) is documented to
-        //     share that same flipped convention, so subtracting two
-        //     velocity vectors both read from Orbit methods (as this code
-        //     does) should stay internally consistent. That note wasn't
-        //     found written specifically against getOrbitalVelocityAtUT
-        //     itself, only stated generally for the class, so treat this as
-        //     "likely fine, not independently confirmed" rather than fully
-        //     settled - recheck once this can actually run against KSP.
-        //   - mid-course correction's burn direction is a known-unsolved
-        //     sign question, not just unverified - see the comment on
-        //     BuildMidCourseCorrectionNode.
-        //   - GetVesselDeltaV's exact stock field name (TotalDeltaVActual)
-        //     could NOT be confirmed - see that method's comment.
+        //     the KSP API docs state "all Vector3d's returned by Orbit class
+        //     functions have their y and z axes flipped", so position and
+        //     velocity vectors read from Orbit methods share one frame and
+        //     can be combined directly. Documented for the class as a whole,
+        //     not per-method - recheck once this runs against KSP.
         void DoAutopilot()
         {
             Vessel vessel = FlightGlobals.ActiveVessel;
@@ -707,6 +741,12 @@ namespace KSPMacropad
             if (autopilotPhase != AutopilotPhase.Idle)
             {
                 Debug.Log("[KSPMacropad] AUTOPILOT: transfer already in progress, ignoring press");
+                return;
+            }
+
+            if (IsFlightComputerBusy())
+            {
+                Debug.Log("[KSPMacropad] AUTOPILOT: another macro is flying the vessel, ignoring press");
                 return;
             }
 
@@ -787,7 +827,7 @@ namespace KSPMacropad
             autopilotPhase = AutopilotPhase.WaitEjectionBurn;
 
             SetLEDState(0x0F, LEDStates.AUTOPILOT_PLANNING, 0x00);
-            TimeWarp.fetch.WarpTo(departureUT);
+            WarpToBurn(departureUT);
         }
 
         // Drives the AUTOPILOT state machine forward one tick. No-op when
@@ -806,7 +846,7 @@ namespace KSPMacropad
             if (currentUT > autopilotDeadlineUT)
             {
                 AbortAutopilot(vessel, "exceeded expected transfer time without reaching the destination SOI " +
-                    "(expected - this build has no phase-angle/launch-window targeting)");
+                    "(ejection burn pointing is prograde-only - see caveats on DoAutopilot)");
                 return;
             }
 
@@ -825,7 +865,7 @@ namespace KSPMacropad
                         autopilotMidCourseUT = currentUT + autopilotTransferTime / 2.0;
                         autopilotPhase = AutopilotPhase.WaitMidCourse;
                         SetLEDState(0x0F, LEDStates.AUTOPILOT_EXECUTING, 0x00);
-                        TimeWarp.fetch.WarpTo(autopilotMidCourseUT);
+                        WarpToBurn(autopilotMidCourseUT);
                     }
                     break;
 
@@ -863,19 +903,15 @@ namespace KSPMacropad
                     if (vessel.mainBody == autopilotDestination)
                     {
                         Debug.Log("[KSPMacropad] AUTOPILOT: entered destination SOI, planning capture burn");
-                        double periapsisUT = currentUT + vessel.orbit.timeToPe; // confirmed real property - see FindBestTransferWindow's header comment
-                        double rCapture = autopilotDestination.Radius + 100000.0;
-                        double vCircCapture = Math.Sqrt(autopilotDestination.gravParameter / rCapture);
-                        double vAtPeriapsis = vessel.orbit.getOrbitalVelocityAtUT(periapsisUT).magnitude; // confirmed real method (getOrbitalSpeedAtUT does NOT exist - caught by checking against KSP API docs)
-                        double captureBurnDv = vCircCapture - vAtPeriapsis; // negative = retrograde burn
-
+                        // Circularize at the arrival periapsis, whatever
+                        // altitude that ended up being.
+                        double periapsisUT = currentUT + vessel.orbit.timeToPe;
                         ManeuverNode captureNode = vessel.patchedConicSolver.AddManeuverNode(periapsisUT);
-                        captureNode.DeltaV = new Vector3d(0, 0, captureBurnDv); // confirmed real field/convention
-                        vessel.patchedConicSolver.UpdateFlightPlan(); // confirmed real method
+                        SetNodeFromOrbitFrameDv(vessel, captureNode, CircularizeDvAt(vessel.orbit, autopilotDestination.gravParameter, periapsisUT));
 
                         autopilotActiveNode = captureNode;
                         autopilotPhase = AutopilotPhase.WaitCaptureBurn;
-                        TimeWarp.fetch.WarpTo(periapsisUT);
+                        WarpToBurn(periapsisUT);
                     }
                     break;
 
@@ -897,60 +933,21 @@ namespace KSPMacropad
             }
         }
 
-        // Shared burn executor for every AUTOPILOT phase: points the vessel
-        // at the node's burn vector using stock SAS maneuver-hold (same
-        // Autopilot.Enabled/SetMode pattern DoDockingPrep already uses for
-        // Target mode), holds full throttle, and reports done once the
-        // node's remaining burn vector drops under AUTOPILOT_DV_EPSILON.
-        bool ExecuteNodeBurn(Vessel vessel, ManeuverNode node)
-        {
-            double remaining = node.GetBurnVector(vessel.orbit).magnitude;
-
-            if (remaining < AUTOPILOT_DV_EPSILON)
-            {
-                FlightInputHandler.state.mainThrottle = 0f;
-                vessel.Autopilot.Enabled = false;
-                vessel.patchedConicSolver.RemoveManeuverNode(node);
-                return true;
-            }
-
-            vessel.Autopilot.Enabled = true;
-            vessel.Autopilot.SetMode(VesselAutopilot.AutopilotMode.Maneuver);
-            FlightInputHandler.state.mainThrottle = 1f; // full throttle, no tapering near completion - see caveats above
-            return false;
-        }
-
-        // Mid-course correction: nulls relative inclination between the
-        // vessel's current (heliocentric) orbital plane and the destination
-        // body's orbital plane. This is a real, computable correction, but
-        // it is NOT a real aim-point/targeting correction - it doesn't know
-        // whether the ejection burn above is actually going to intercept the
-        // destination (see the big caveat on DoAutopilot). Returns null if
-        // the mismatch is negligible, so the caller can skip straight to
-        // waiting for the destination SOI.
-        //
-        // KNOWN GAP: the sign of normalDv below is a guess. Confirmed
-        // against the KSP API docs: ManeuverNode.DeltaV's Y-component is
-        // "delta-V in the normal-MINUS direction" (not plain normal), and
-        // separately, this code never determines whether the vessel is
-        // approaching its ascending or descending node relative to the
-        // destination's orbital plane - that's what actually decides which
-        // sign kills the mismatch instead of doubling it. So this burn may
-        // apply in the wrong direction as-is; needs a real ascending/
-        // descending-node check before trusting it.
+        // Mid-course correction: rotates the vessel's velocity into the
+        // destination body's orbital plane, keeping its magnitude. Built as
+        // a full vector (PlaneMatchDv), so the burn direction falls out of
+        // the geometry rather than needing an ascending/descending-node
+        // sign decision. Returns null if the planes already match.
         ManeuverNode BuildMidCourseCorrectionNode(Vessel vessel, CelestialBody destination, double ut)
         {
-            double relIncDeg = Math.Abs(vessel.orbit.inclination - destination.orbit.inclination);
-            if (relIncDeg < 0.05)
+            Vector3d destNormal = OrbitNormalAt(destination.orbit, ut);
+            Vector3d vesselNormal = OrbitNormalAt(vessel.orbit, ut);
+            if (OrbitMath.AngleDeg(vesselNormal, destNormal) < ORBITSYNC_MIN_REL_INCLINATION_DEG)
                 return null;
 
-            double relIncRad = relIncDeg * Math.PI / 180.0;
-            double vNow = vessel.orbit.getOrbitalVelocityAtUT(ut).magnitude; // confirmed real method (getOrbitalSpeedAtUT does NOT exist)
-            double normalDv = 2.0 * vNow * Math.Sin(relIncRad / 2.0);
-
+            Vector3d dv = OrbitMath.PlaneMatchDv(vessel.orbit.getOrbitalVelocityAtUT(ut), destNormal);
             ManeuverNode node = vessel.patchedConicSolver.AddManeuverNode(ut);
-            node.DeltaV = new Vector3d(0, normalDv, 0); // normal-only, no prograde component - see sign caveat above
-            vessel.patchedConicSolver.UpdateFlightPlan(); // confirmed real method, no documented params
+            SetNodeFromOrbitFrameDv(vessel, node, dv);
             return node;
         }
 
@@ -976,22 +973,15 @@ namespace KSPMacropad
         }
 
         // ------------------------------------------------------------------
-        // Transfer-window search (Lambert solver). This is the piece that
-        // actually solves for WHEN to leave, not just how big a burn -
-        // sizing a Hohmann-radius burn without this can put a vessel on an
-        // orbit of the right size that still never meets the destination.
+        // Transfer-window search. Solves for WHEN to leave, not just how big
+        // a burn - a correctly sized Hohmann burn at the wrong time reaches
+        // the right radius with the destination somewhere else.
         //
-        // The universal-variable Lambert solver below was prototyped and
-        // checked in Python against a published textbook case (Curtis,
-        // "Orbital Mechanics for Engineering Students", Example 5.2 - a
-        // known r1/r2/time-of-flight triple with a known answer) before
-        // being translated here, matching to 5 significant figures. The
-        // C# translation itself has NOT been compiled or run (no KSP
-        // install on this dev machine, same caveat as the rest of this
-        // file) - re-check the arithmetic once it can actually build.
-        // See DoAutopilot's comment for the specific coordinate-frame risk
-        // this still carries (getRelativePositionAtUT vs
-        // getOrbitalVelocityAtUT).
+        // The Lambert solver lives in OrbitMath (bottom of this file) and is
+        // compiled and unit-tested outside KSP against a published textbook
+        // case (Curtis, "Orbital Mechanics for Engineering Students",
+        // Example 5.2). The KSP-facing code around it has not been run in
+        // game yet.
         // ------------------------------------------------------------------
 
         private const int TRANSFER_SEARCH_MAX_DEPARTURES = 60;
@@ -999,12 +989,11 @@ namespace KSPMacropad
         private const double TRANSFER_SEARCH_TOF_MIN_FRACTION = 0.5;
         private const double TRANSFER_SEARCH_TOF_MAX_FRACTION = 1.5;
 
-        // Searches the vessel's own upcoming periapsis passages (the burn
-        // can only happen there, per the rest of this file) crossed with a
-        // spread of times-of-flight around the analytic Hohmann estimate,
-        // Lambert-solving each pair and keeping the one with the lowest
-        // ejection+capture dv. Returns false if nothing in the grid
-        // produced a valid Lambert solution.
+        // Searches the vessel's own upcoming periapsis passages (where the
+        // ejection burn happens) crossed with a spread of times-of-flight
+        // around the analytic Hohmann estimate, Lambert-solving each pair
+        // and keeping the one with the lowest ejection+capture dv. Returns
+        // false if nothing in the grid produced a valid Lambert solution.
         bool FindBestTransferWindow(Vessel vessel, CelestialBody originBody, CelestialBody destinationBody,
             out double bestDepartureUT, out double bestArrivalUT, out double bestEjectionDv, out double bestCaptureDv)
         {
@@ -1017,12 +1006,10 @@ namespace KSPMacropad
 
             double muSun = Planetarium.fetch.Sun.gravParameter;
 
-            double r1Approx = originBody.orbit.semiMajorAxis;
-            double r2Approx = destinationBody.orbit.semiMajorAxis;
-            double aTransferApprox = (r1Approx + r2Approx) / 2.0;
+            double aTransferApprox = (originBody.orbit.semiMajorAxis + destinationBody.orbit.semiMajorAxis) / 2.0;
             double hohmannEstimate = Math.PI * Math.Sqrt(Math.Pow(aTransferApprox, 3) / muSun);
 
-            double synodicPeriod = EstimateSynodicPeriod(originBody.orbit.period, destinationBody.orbit.period);
+            double synodicPeriod = OrbitMath.SynodicPeriod(originBody.orbit.period, destinationBody.orbit.period);
 
             double currentUT = Planetarium.GetUniversalTime();
             double vesselPeriod = vessel.orbit.period;
@@ -1032,15 +1019,13 @@ namespace KSPMacropad
                 ? Math.Min(TRANSFER_SEARCH_MAX_DEPARTURES, (int)Math.Ceiling(synodicPeriod / vesselPeriod) + 1)
                 : 1; // not on a stable elliptical orbit - only the immediate next periapsis is usable
 
-            // Orbit has no NextPeriapsisTime(UT) method (checked against the
-            // KSP API docs - it doesn't exist); timeToPe is the real,
-            // confirmed property for this.
             double departureUT = currentUT + vessel.orbit.timeToPe;
 
             for (int d = 0; d < maxCandidates && departureUT < currentUT + synodicPeriod; d++)
             {
-                Vector3d r1vec = originBody.orbit.getRelativePositionAtUT(departureUT); // confirmed real method
-                Vector3d vOriginAtDep = originBody.orbit.getOrbitalVelocityAtUT(departureUT); // confirmed real method - see frame-consistency note on DoAutopilot
+                Vector3d r1vec = originBody.orbit.getRelativePositionAtUT(departureUT);
+                Vector3d vOriginAtDep = originBody.orbit.getOrbitalVelocityAtUT(departureUT);
+                Vector3d refNormal = Vector3d.Cross(r1vec, vOriginAtDep);
 
                 for (int t = 0; t < TRANSFER_SEARCH_TOF_SAMPLES; t++)
                 {
@@ -1052,7 +1037,7 @@ namespace KSPMacropad
                     Vector3d r2vec = destinationBody.orbit.getRelativePositionAtUT(arrivalUT);
                     Vector3d vDestAtArr = destinationBody.orbit.getOrbitalVelocityAtUT(arrivalUT);
 
-                    if (!SolveLambert(r1vec, r2vec, tof, muSun, out Vector3d vTransferAtDep, out Vector3d vTransferAtArr))
+                    if (!OrbitMath.SolveLambert(r1vec, r2vec, tof, muSun, refNormal, out Vector3d vTransferAtDep, out Vector3d vTransferAtArr))
                         continue;
 
                     double vInfDepart = (vTransferAtDep - vOriginAtDep).magnitude;
@@ -1079,13 +1064,6 @@ namespace KSPMacropad
             return found;
         }
 
-        double EstimateSynodicPeriod(double periodA, double periodB)
-        {
-            if (periodA <= 0 || periodB <= 0 || Math.Abs(periodA - periodB) < 1e-6)
-                return Math.Max(periodA, periodB); // degenerate - fall back rather than dividing by ~0
-            return Math.Abs(1.0 / (1.0 / periodA - 1.0 / periodB));
-        }
-
         // dv from a circular parking orbit around originBody up to
         // hyperbolic excess speed vInf (magnitude only - see the
         // pointing-error caveat on DoAutopilot).
@@ -1093,9 +1071,8 @@ namespace KSPMacropad
         {
             double muOrigin = originBody.gravParameter;
             double rPark = vessel.orbit.semiMajorAxis;
-            double vCircPark = Math.Sqrt(muOrigin / rPark);
             double vHyperbolicAtPark = Math.Sqrt(vInf * vInf + 2.0 * muOrigin / rPark);
-            return vHyperbolicAtPark - vCircPark;
+            return vHyperbolicAtPark - OrbitMath.CircularSpeed(muOrigin, rPark);
         }
 
         // dv from hyperbolic arrival speed vInf down into a circular
@@ -1105,21 +1082,923 @@ namespace KSPMacropad
         {
             double muDest = destinationBody.gravParameter;
             double rCapture = destinationBody.Radius + 100000.0;
-            double vCircCapture = Math.Sqrt(muDest / rCapture);
             double vHyperbolicAtCapture = Math.Sqrt(vInf * vInf + 2.0 * muDest / rCapture);
-            return vHyperbolicAtCapture - vCircCapture;
+            return vHyperbolicAtCapture - OrbitMath.CircularSpeed(muDest, rCapture);
         }
 
-        // Universal-variable Lambert solver (short-way, single-revolution
-        // branch). Solves for the two transfer-orbit velocity vectors that
-        // connect r1vec to r2vec in time tof. Finds the root of the
-        // Stumpff-function time equation by scanning the valid z-range for
-        // a sign change and bisecting, rather than a closed-form Newton
-        // derivative - slower, but nothing to get subtly wrong in the
-        // derivative algebra. Returns false for a near-180-degree transfer
-        // angle (singular for this method) or if no root is found in the
-        // scanned range, rather than guessing.
-        bool SolveLambert(Vector3d r1vec, Vector3d r2vec, double tof, double mu, out Vector3d v1, out Vector3d v2)
+        // ------------------------------------------------------------------
+        // Shared maneuver-node plumbing: building a node from a desired dv
+        // vector, warping to it, and flying the burn. Used by CIRCULARIZE,
+        // DEORBIT, INTERCEPT, ORBIT SYNC and AUTOPILOT.
+        // ------------------------------------------------------------------
+
+        bool IsFlightComputerBusy()
+        {
+            return autopilotPhase != AutopilotPhase.Idle || nodeJobPhase != NodeJobPhase.None || agtActive;
+        }
+
+        static Vector3d ToVector3d(Vector3 v)
+        {
+            return new Vector3d(v.x, v.y, v.z);
+        }
+
+        static void EnsureSAS(Vessel vessel)
+        {
+            if (!vessel.ActionGroups[KSPActionGroup.SAS])
+                vessel.ActionGroups.ToggleGroup(KSPActionGroup.SAS);
+        }
+
+        static Vector3d OrbitNormalAt(Orbit orbit, double ut)
+        {
+            return Vector3d.Cross(orbit.getRelativePositionAtUT(ut), orbit.getOrbitalVelocityAtUT(ut)).normalized;
+        }
+
+        // dv (Orbit frame) that turns the velocity at ut into a circular
+        // orbit at the current radius, removing any radial component too.
+        static Vector3d CircularizeDvAt(Orbit orbit, double mu, double ut)
+        {
+            Vector3d pos = orbit.getRelativePositionAtUT(ut);
+            Vector3d vel = orbit.getOrbitalVelocityAtUT(ut);
+            return OrbitMath.Horizontal(pos, vel) * OrbitMath.CircularSpeed(mu, pos.magnitude) - vel;
+        }
+
+        // Stops warping NODE_WARP_LEAD_SECONDS before a burn so SAS has time
+        // to swing around before the throttle opens.
+        void WarpToBurn(double burnUT)
+        {
+            double target = burnUT - NODE_WARP_LEAD_SECONDS;
+            if (target > Planetarium.GetUniversalTime() + 1.0)
+                TimeWarp.fetch.WarpTo(target);
+        }
+
+        // Sets node.DeltaV from a dv vector in the Orbit frame. Radial and
+        // prograde components are dot products, which don't depend on the
+        // frame's handedness. The normal component does: ManeuverNode.DeltaV
+        // is documented as (radial-plus, normal-MINUS, prograde), and the
+        // Orbit frame is y/z-swapped relative to world space, so the sign
+        // of the normal axis is resolved empirically instead of assumed -
+        // both signs are tried and the one whose resulting
+        // GetBurnVector() matches the requested dv is kept.
+        void SetNodeFromOrbitFrameDv(Vessel vessel, ManeuverNode node, Vector3d dvOrbitFrame)
+        {
+            Orbit patch = node.patch ?? vessel.orbit;
+            Vector3d pos = patch.getRelativePositionAtUT(node.UT);
+            Vector3d vel = patch.getOrbitalVelocityAtUT(node.UT);
+            OrbitMath.DecomposeBurn(pos, vel, dvOrbitFrame, out double radial, out double normal, out double prograde);
+
+            Vector3d best = new Vector3d(radial, normal, prograde);
+            double bestErr = double.MaxValue;
+            for (int sign = 1; sign >= -1; sign -= 2)
+            {
+                Vector3d candidate = new Vector3d(radial, sign * normal, prograde);
+                node.DeltaV = candidate;
+                vessel.patchedConicSolver.UpdateFlightPlan();
+                Vector3d burn = node.GetBurnVector(patch);
+                double err = Math.Min((burn - dvOrbitFrame).magnitude, (burn - OrbitMath.SwapYZ(dvOrbitFrame)).magnitude);
+                if (err < bestErr)
+                {
+                    bestErr = err;
+                    best = candidate;
+                }
+            }
+
+            node.DeltaV = best;
+            vessel.patchedConicSolver.UpdateFlightPlan();
+
+            if (bestErr > 0.01 * dvOrbitFrame.magnitude + 0.1)
+                Debug.Log("[KSPMacropad] WARNING: node burn vector differs from requested dv by " + bestErr +
+                    " m/s - GetBurnVector's frame may not be what SetNodeFromOrbitFrameDv assumes");
+        }
+
+        // Flies one node: holds SAS on the node, keeps the throttle closed
+        // until pointed within NODE_ALIGN_TOLERANCE_DEG, tapers the throttle
+        // over the last NODE_TAPER_DV m/s, and reports done once the
+        // remaining dv is under AUTOPILOT_DV_EPSILON or the burn vector has
+        // flipped past 90 degrees from where it started (overshoot).
+        // Removes the node when done.
+        bool ExecuteNodeBurn(Vessel vessel, ManeuverNode node)
+        {
+            Vector3d burn = node.GetBurnVector(vessel.orbit);
+            double remaining = burn.magnitude;
+
+            if (node != activeBurnNode)
+            {
+                activeBurnNode = node;
+                activeBurnStartDir = burn.normalized;
+            }
+
+            bool overshot = Vector3d.Dot(burn, activeBurnStartDir) < 0;
+            if (remaining < AUTOPILOT_DV_EPSILON || overshot)
+            {
+                FlightInputHandler.state.mainThrottle = 0f;
+                vessel.Autopilot.SetMode(VesselAutopilot.AutopilotMode.StabilityAssist);
+                vessel.patchedConicSolver.RemoveManeuverNode(node);
+                activeBurnNode = null;
+                return true;
+            }
+
+            EnsureSAS(vessel);
+            if (vessel.Autopilot.Mode != VesselAutopilot.AutopilotMode.Maneuver)
+                vessel.Autopilot.SetMode(VesselAutopilot.AutopilotMode.Maneuver);
+
+            double pointingError = OrbitMath.AngleDeg(ToVector3d(vessel.ReferenceTransform.up), burn);
+            float throttle = 0f;
+            if (pointingError <= NODE_ALIGN_TOLERANCE_DEG)
+                throttle = (float)Math.Max(0.05, Math.Min(1.0, remaining / NODE_TAPER_DV));
+
+            FlightInputHandler.state.mainThrottle = throttle;
+            return false;
+        }
+
+        void StartNodeJob(Vessel vessel, ManeuverNode node, byte keyId, byte idleState, byte warpingState,
+            byte burningState, Action onComplete)
+        {
+            nodeJobNode = node;
+            nodeJobKeyId = keyId;
+            nodeJobIdleState = idleState;
+            nodeJobBurningState = burningState;
+            nodeJobOnComplete = onComplete;
+            nodeJobPhase = NodeJobPhase.Warping;
+
+            SetLEDState(keyId, warpingState, 0x00);
+            WarpToBurn(node.UT);
+        }
+
+        void TickNodeJob()
+        {
+            if (nodeJobPhase == NodeJobPhase.None)
+                return;
+
+            Vessel vessel = FlightGlobals.ActiveVessel;
+            if (vessel == null)
+                return;
+
+            if (!vessel.patchedConicSolver.maneuverNodes.Contains(nodeJobNode))
+            {
+                CancelNodeJob("node was deleted");
+                return;
+            }
+
+            double currentUT = Planetarium.GetUniversalTime();
+
+            if (nodeJobPhase == NodeJobPhase.Warping)
+            {
+                if (currentUT >= nodeJobNode.UT)
+                {
+                    nodeJobPhase = NodeJobPhase.Burning;
+                    SetLEDState(nodeJobKeyId, nodeJobBurningState, 0x00);
+                }
+                else if (currentUT >= nodeJobNode.UT - NODE_WARP_LEAD_SECONDS && TimeWarp.CurrentRateIndex == 0)
+                {
+                    EnsureSAS(vessel);
+                    if (vessel.Autopilot.Mode != VesselAutopilot.AutopilotMode.Maneuver)
+                        vessel.Autopilot.SetMode(VesselAutopilot.AutopilotMode.Maneuver);
+                }
+            }
+
+            if (nodeJobPhase == NodeJobPhase.Burning && ExecuteNodeBurn(vessel, nodeJobNode))
+            {
+                Action onComplete = nodeJobOnComplete;
+                nodeJobPhase = NodeJobPhase.None;
+                nodeJobNode = null;
+                nodeJobOnComplete = null;
+                onComplete?.Invoke();
+            }
+        }
+
+        void CancelNodeJob(string reason)
+        {
+            Debug.Log("[KSPMacropad] Node burn cancelled - " + reason);
+            FlightInputHandler.state.mainThrottle = 0f;
+
+            Vessel vessel = FlightGlobals.ActiveVessel;
+            if (vessel != null && nodeJobNode != null && vessel.patchedConicSolver.maneuverNodes.Contains(nodeJobNode))
+                vessel.patchedConicSolver.RemoveManeuverNode(nodeJobNode);
+
+            SetLEDState(nodeJobKeyId, nodeJobIdleState, 0x00);
+            nodeJobPhase = NodeJobPhase.None;
+            nodeJobNode = null;
+            nodeJobOnComplete = null;
+            activeBurnNode = null;
+        }
+
+        // A second press of the key that owns the running burn cancels it.
+        // Returns true if the press was consumed that way.
+        bool CancelIfOwnJobRunning(byte keyId)
+        {
+            if (nodeJobPhase == NodeJobPhase.None || nodeJobKeyId != keyId)
+                return false;
+
+            CancelNodeJob("cancelled by keypress");
+            return true;
+        }
+
+        bool HasDeltaVFor(Vessel vessel, double requiredDv, string macroName)
+        {
+            double availableDv = GetVesselDeltaV(vessel);
+            if (availableDv >= requiredDv)
+                return true;
+
+            Debug.Log("[KSPMacropad] " + macroName + ": needs " + requiredDv + " m/s, vessel has " + availableDv + " m/s");
+            return false;
+        }
+
+        // ------------------------------------------------------------------
+        // CIRCULARIZE (0x02): circularize at the next apoapsis.
+        // ------------------------------------------------------------------
+        void DoCircularize()
+        {
+            Vessel vessel = FlightGlobals.ActiveVessel;
+            if (vessel == null || CancelIfOwnJobRunning(0x02))
+                return;
+
+            if (IsFlightComputerBusy())
+            {
+                Debug.Log("[KSPMacropad] CIRCULARIZE: another macro is flying the vessel, ignoring press");
+                return;
+            }
+
+            Orbit orbit = vessel.orbit;
+            CelestialBody body = vessel.mainBody;
+            Vessel.Situations s = vessel.situation;
+
+            if (s == Vessel.Situations.PRELAUNCH || s == Vessel.Situations.LANDED || s == Vessel.Situations.SPLASHED ||
+                orbit.eccentricity >= 1.0 || orbit.ApA <= 0)
+            {
+                Debug.Log("[KSPMacropad] CIRCULARIZE: no apoapsis to circularize at");
+                SetLEDState(0x02, LEDStates.CIRC_UNAVAILABLE, 0x00);
+                return;
+            }
+
+            if (body.atmosphere && orbit.ApA < body.atmosphereDepth)
+            {
+                Debug.Log("[KSPMacropad] CIRCULARIZE: apoapsis is inside the atmosphere");
+                SetLEDState(0x02, LEDStates.CIRC_UNAVAILABLE, 0x00);
+                return;
+            }
+
+            SetLEDState(0x02, LEDStates.CIRC_CALCULATING, 0x00);
+
+            double burnUT = Planetarium.GetUniversalTime() + orbit.timeToAp;
+            Vector3d dv = CircularizeDvAt(orbit, body.gravParameter, burnUT);
+
+            if (!HasDeltaVFor(vessel, dv.magnitude, "CIRCULARIZE"))
+            {
+                SetLEDState(0x02, LEDStates.CIRC_UNAVAILABLE, 0x00);
+                return;
+            }
+
+            ManeuverNode node = vessel.patchedConicSolver.AddManeuverNode(burnUT);
+            SetNodeFromOrbitFrameDv(vessel, node, dv);
+
+            // CIRC has no dedicated burning state - WARPING stays lit through the burn.
+            StartNodeJob(vessel, node, 0x02, LEDStates.CIRC_IDLE, LEDStates.CIRC_WARPING, LEDStates.CIRC_WARPING,
+                () => SetLEDState(0x02, LEDStates.CIRC_COMPLETE, 0x00));
+        }
+
+        // ------------------------------------------------------------------
+        // DEORBIT BURN (0x07): retrograde SAS, then a burn at apoapsis that
+        // drops periapsis to DEORBIT_ATMOSPHERE_FRACTION of the atmosphere's
+        // depth (or to sea level on an airless body).
+        // ------------------------------------------------------------------
+        void DoDeorbitBurn()
+        {
+            Vessel vessel = FlightGlobals.ActiveVessel;
+            if (vessel == null || CancelIfOwnJobRunning(0x07))
+                return;
+
+            if (IsFlightComputerBusy())
+            {
+                Debug.Log("[KSPMacropad] DEORBIT: another macro is flying the vessel, ignoring press");
+                return;
+            }
+
+            Orbit orbit = vessel.orbit;
+            CelestialBody body = vessel.mainBody;
+
+            if (vessel.situation != Vessel.Situations.ORBITING)
+            {
+                Debug.Log("[KSPMacropad] DEORBIT: not in a stable orbit");
+                SetLEDState(0x07, LEDStates.DEORBIT_UNAVAILABLE, 0x00);
+                return;
+            }
+
+            double targetPeR = body.Radius + (body.atmosphere ? body.atmosphereDepth * DEORBIT_ATMOSPHERE_FRACTION : 0.0);
+            if (orbit.PeR <= targetPeR)
+            {
+                Debug.Log("[KSPMacropad] DEORBIT: periapsis is already at or below the deorbit target");
+                SetLEDState(0x07, LEDStates.DEORBIT_UNAVAILABLE, 0x00);
+                return;
+            }
+
+            EnsureSAS(vessel);
+            vessel.Autopilot.SetMode(VesselAutopilot.AutopilotMode.Retrograde);
+
+            double burnUT = Planetarium.GetUniversalTime() + orbit.timeToAp;
+            Vector3d pos = orbit.getRelativePositionAtUT(burnUT);
+            Vector3d vel = orbit.getOrbitalVelocityAtUT(burnUT);
+            double r = pos.magnitude;
+            Vector3d vNew = OrbitMath.Horizontal(pos, vel) * OrbitMath.VisVivaSpeed(body.gravParameter, r, (r + targetPeR) / 2.0);
+            Vector3d dv = vNew - vel;
+
+            if (!HasDeltaVFor(vessel, dv.magnitude, "DEORBIT"))
+            {
+                SetLEDState(0x07, LEDStates.DEORBIT_UNAVAILABLE, 0x00);
+                return;
+            }
+
+            ManeuverNode node = vessel.patchedConicSolver.AddManeuverNode(burnUT);
+            SetNodeFromOrbitFrameDv(vessel, node, dv);
+            SetLEDState(0x07, LEDStates.DEORBIT_PLANNED, 0x00);
+
+            StartNodeJob(vessel, node, 0x07, LEDStates.DEORBIT_IDLE, LEDStates.DEORBIT_WARPING, LEDStates.DEORBIT_BURNING,
+                () => SetLEDState(0x07, LEDStates.DEORBIT_IDLE, 0x00));
+        }
+
+        // Current target's orbit, only if it orbits the same body as the
+        // vessel (INTERCEPT and ORBIT SYNC both work within one SOI).
+        Orbit GetTargetOrbitInSameSOI(Vessel vessel, string macroName)
+        {
+            ITargetable target = FlightGlobals.fetch.VesselTarget;
+            if (target == null)
+            {
+                Debug.Log("[KSPMacropad] " + macroName + ": no target selected");
+                return null;
+            }
+
+            Orbit targetOrbit = target.GetOrbit();
+            if (targetOrbit == null || targetOrbit.referenceBody != vessel.mainBody)
+            {
+                Debug.Log("[KSPMacropad] " + macroName + ": target isn't orbiting the same body as the vessel");
+                return null;
+            }
+
+            if (vessel.orbit.eccentricity >= 1.0)
+            {
+                Debug.Log("[KSPMacropad] " + macroName + ": vessel isn't in a closed orbit");
+                return null;
+            }
+
+            return targetOrbit;
+        }
+
+        // ------------------------------------------------------------------
+        // INTERCEPT CALC (0x04): first press plans the cheapest intercept
+        // burn to the current target and shows it (SOLUTION / INSUFFICIENT_DV);
+        // second press flies it. LED stays SOLUTION during execution (no
+        // executing state is defined for this key), then returns to IDLE.
+        //
+        // Aims at the target's center. For a vessel that's what you want;
+        // for a moon it gives an SOI encounter with a low (possibly impact)
+        // periapsis that needs a small correction after.
+        // ------------------------------------------------------------------
+        void DoInterceptCalc()
+        {
+            Vessel vessel = FlightGlobals.ActiveVessel;
+            if (vessel == null || CancelIfOwnJobRunning(0x04))
+                return;
+
+            if (IsFlightComputerBusy())
+            {
+                Debug.Log("[KSPMacropad] INTERCEPT: another macro is flying the vessel, ignoring press");
+                return;
+            }
+
+            if (interceptPlannedNode != null && vessel.patchedConicSolver.maneuverNodes.Contains(interceptPlannedNode))
+            {
+                ManeuverNode planned = interceptPlannedNode;
+                interceptPlannedNode = null;
+                StartNodeJob(vessel, planned, 0x04, LEDStates.INTERCEPT_IDLE, LEDStates.INTERCEPT_SOLUTION, LEDStates.INTERCEPT_SOLUTION,
+                    () => SetLEDState(0x04, LEDStates.INTERCEPT_IDLE, 0x00));
+                return;
+            }
+            interceptPlannedNode = null;
+
+            Orbit targetOrbit = GetTargetOrbitInSameSOI(vessel, "INTERCEPT");
+            if (targetOrbit == null)
+            {
+                SetLEDState(0x04, LEDStates.INTERCEPT_IDLE, 0x00);
+                return;
+            }
+
+            SetLEDState(0x04, LEDStates.INTERCEPT_CALCULATING, 0x00);
+
+            CelestialBody body = vessel.mainBody;
+            double minSafeRadius = body.Radius + (body.atmosphere ? body.atmosphereDepth : 0.0) + INTERCEPT_SAFE_ALTITUDE_MARGIN;
+
+            if (!FindBestIntercept(vessel.orbit, targetOrbit, minSafeRadius, out double departureUT, out Vector3d dv))
+            {
+                Debug.Log("[KSPMacropad] INTERCEPT: no intercept found in the search window");
+                SetLEDState(0x04, LEDStates.INTERCEPT_INSUFFICIENT_DV, 0x00);
+                return;
+            }
+
+            Debug.Log("[KSPMacropad] INTERCEPT: burn of " + dv.magnitude + " m/s at UT " + departureUT);
+
+            if (!HasDeltaVFor(vessel, dv.magnitude, "INTERCEPT"))
+            {
+                SetLEDState(0x04, LEDStates.INTERCEPT_INSUFFICIENT_DV, 0x00);
+                return;
+            }
+
+            ManeuverNode node = vessel.patchedConicSolver.AddManeuverNode(departureUT);
+            SetNodeFromOrbitFrameDv(vessel, node, dv);
+            interceptPlannedNode = node;
+            SetLEDState(0x04, LEDStates.INTERCEPT_SOLUTION, 0x00);
+        }
+
+        // Grid search over departure time (up to one synodic period, capped
+        // at INTERCEPT_MAX_WINDOW_ORBITS vessel orbits) x time of flight,
+        // Lambert-solving each pair and keeping the smallest departure burn.
+        // Rejects any transfer orbit whose periapsis is below minSafeRadius
+        // - conservative, since that periapsis might fall after the
+        // intercept, but it never returns a trajectory through the ground.
+        bool FindBestIntercept(Orbit vesselOrbit, Orbit targetOrbit, double minSafeRadius,
+            out double bestDepartureUT, out Vector3d bestDv)
+        {
+            bestDepartureUT = 0;
+            bestDv = Vector3d.zero;
+            double bestCost = double.MaxValue;
+
+            double mu = vesselOrbit.referenceBody.gravParameter;
+            double start = Planetarium.GetUniversalTime() + NODE_MIN_LEAD_SECONDS;
+            double window = Math.Min(OrbitMath.SynodicPeriod(vesselOrbit.period, targetOrbit.period),
+                INTERCEPT_MAX_WINDOW_ORBITS * vesselOrbit.period);
+
+            double aTransfer = (vesselOrbit.semiMajorAxis + targetOrbit.semiMajorAxis) / 2.0;
+            double hohmannEstimate = Math.PI * Math.Sqrt(Math.Pow(aTransfer, 3) / mu);
+
+            for (int i = 0; i < INTERCEPT_DEPARTURE_SAMPLES; i++)
+            {
+                double departureUT = start + window * i / (INTERCEPT_DEPARTURE_SAMPLES - 1);
+                Vector3d r1 = vesselOrbit.getRelativePositionAtUT(departureUT);
+                Vector3d v0 = vesselOrbit.getOrbitalVelocityAtUT(departureUT);
+                Vector3d refNormal = Vector3d.Cross(r1, v0);
+
+                for (int j = 0; j < INTERCEPT_TOF_SAMPLES; j++)
+                {
+                    double frac = INTERCEPT_TOF_MIN_FRACTION +
+                        (INTERCEPT_TOF_MAX_FRACTION - INTERCEPT_TOF_MIN_FRACTION) * j / (INTERCEPT_TOF_SAMPLES - 1);
+                    double tof = hohmannEstimate * frac;
+                    Vector3d r2 = targetOrbit.getRelativePositionAtUT(departureUT + tof);
+
+                    if (!OrbitMath.SolveLambert(r1, r2, tof, mu, refNormal, out Vector3d v1, out Vector3d _))
+                        continue;
+
+                    if (OrbitMath.PeriapsisRadius(r1, v1, mu) < minSafeRadius)
+                        continue;
+
+                    double cost = (v1 - v0).magnitude;
+                    if (cost < bestCost)
+                    {
+                        bestCost = cost;
+                        bestDepartureUT = departureUT;
+                        bestDv = v1 - v0;
+                    }
+                }
+            }
+
+            return bestCost < double.MaxValue;
+        }
+
+        // ------------------------------------------------------------------
+        // ORBIT SYNC (0x05): match the target's orbital plane, then its
+        // period. Plane change happens where the vessel next crosses the
+        // target's plane (found numerically, so no ascending/descending node
+        // bookkeeping); the period match is a prograde/retrograde burn at
+        // the following periapsis that sets semi-major axis = target's.
+        // A second press while either burn is pending cancels it.
+        // ------------------------------------------------------------------
+        void DoOrbitSync()
+        {
+            Vessel vessel = FlightGlobals.ActiveVessel;
+            if (vessel == null || CancelIfOwnJobRunning(0x05))
+                return;
+
+            if (IsFlightComputerBusy())
+            {
+                Debug.Log("[KSPMacropad] ORBIT SYNC: another macro is flying the vessel, ignoring press");
+                return;
+            }
+
+            Orbit targetOrbit = GetTargetOrbitInSameSOI(vessel, "ORBIT SYNC");
+            if (targetOrbit == null)
+            {
+                SetLEDState(0x05, LEDStates.ORBSYNC_IDLE, 0x00);
+                return;
+            }
+
+            SetLEDState(0x05, LEDStates.ORBSYNC_CALCULATING, 0x00);
+
+            Orbit orbit = vessel.orbit;
+            double now = Planetarium.GetUniversalTime();
+            Vector3d targetNormal = OrbitNormalAt(targetOrbit, now);
+
+            if (OrbitMath.AngleDeg(OrbitNormalAt(orbit, now), targetNormal) < ORBITSYNC_MIN_REL_INCLINATION_DEG)
+            {
+                StartOrbitSyncPeriodMatch(targetOrbit);
+                return;
+            }
+
+            double searchStart = now + NODE_MIN_LEAD_SECONDS;
+            bool found = OrbitMath.FindFirstSignChange(
+                t => Vector3d.Dot(orbit.getRelativePositionAtUT(t), targetNormal),
+                searchStart, searchStart + orbit.period, ORBITSYNC_CROSSING_SAMPLES, out double crossingUT);
+
+            if (!found)
+            {
+                Debug.Log("[KSPMacropad] ORBIT SYNC: couldn't find where the orbit crosses the target's plane");
+                SetLEDState(0x05, LEDStates.ORBSYNC_IDLE, 0x00);
+                return;
+            }
+
+            Vector3d dv = OrbitMath.PlaneMatchDv(orbit.getOrbitalVelocityAtUT(crossingUT), targetNormal);
+            if (!HasDeltaVFor(vessel, dv.magnitude, "ORBIT SYNC"))
+            {
+                SetLEDState(0x05, LEDStates.ORBSYNC_IDLE, 0x00);
+                return;
+            }
+
+            ManeuverNode node = vessel.patchedConicSolver.AddManeuverNode(crossingUT);
+            SetNodeFromOrbitFrameDv(vessel, node, dv);
+
+            StartNodeJob(vessel, node, 0x05, LEDStates.ORBSYNC_IDLE, LEDStates.ORBSYNC_EXECUTING, LEDStates.ORBSYNC_EXECUTING,
+                () => StartOrbitSyncPeriodMatch(targetOrbit));
+        }
+
+        void StartOrbitSyncPeriodMatch(Orbit targetOrbit)
+        {
+            Vessel vessel = FlightGlobals.ActiveVessel;
+            if (vessel == null)
+                return;
+
+            Orbit orbit = vessel.orbit;
+            double mu = orbit.referenceBody.gravParameter;
+            double now = Planetarium.GetUniversalTime();
+
+            double burnUT = now + orbit.timeToPe;
+            if (burnUT < now + NODE_MIN_LEAD_SECONDS)
+                burnUT += orbit.period;
+
+            Vector3d pos = orbit.getRelativePositionAtUT(burnUT);
+            Vector3d vel = orbit.getOrbitalVelocityAtUT(burnUT);
+            double r = pos.magnitude;
+            double aTarget = targetOrbit.semiMajorAxis;
+
+            if (2.0 / r - 1.0 / aTarget <= 0)
+            {
+                Debug.Log("[KSPMacropad] ORBIT SYNC: target's orbit is too small to reach from this periapsis");
+                SetLEDState(0x05, LEDStates.ORBSYNC_IDLE, 0x00);
+                return;
+            }
+
+            Vector3d dv = vel.normalized * OrbitMath.VisVivaSpeed(mu, r, aTarget) - vel;
+            if (dv.magnitude < AUTOPILOT_DV_EPSILON)
+            {
+                SetLEDState(0x05, LEDStates.ORBSYNC_COMPLETE, 0x00);
+                return;
+            }
+
+            if (!HasDeltaVFor(vessel, dv.magnitude, "ORBIT SYNC"))
+            {
+                SetLEDState(0x05, LEDStates.ORBSYNC_IDLE, 0x00);
+                return;
+            }
+
+            ManeuverNode node = vessel.patchedConicSolver.AddManeuverNode(burnUT);
+            SetNodeFromOrbitFrameDv(vessel, node, dv);
+
+            StartNodeJob(vessel, node, 0x05, LEDStates.ORBSYNC_IDLE, LEDStates.ORBSYNC_EXECUTING, LEDStates.ORBSYNC_EXECUTING,
+                () => SetLEDState(0x05, LEDStates.ORBSYNC_COMPLETE, 0x00));
+        }
+
+        // ------------------------------------------------------------------
+        // RENDEZVOUS PREP (0x06): toggle. On: SAS + RCS on, SAS pointed at
+        // the target, precision control on. While on, streams closing
+        // velocity to the pad through the LED data byte (0-255, scaled to
+        // RENDEZVOUS_MAX_CLOSING_MS; 0 when separating) and switches to
+        // IN_RANGE inside RENDEZVOUS_IN_RANGE_METERS. Off restores the
+        // previous precision-control setting.
+        // ------------------------------------------------------------------
+        void DoRendezvousPrep()
+        {
+            Vessel vessel = FlightGlobals.ActiveVessel;
+            if (vessel == null)
+                return;
+
+            if (rendezvousActive)
+            {
+                rendezvousActive = false;
+                FlightInputHandler.fetch.precisionMode = rendezvousPrevPrecisionMode;
+                SetLEDState(0x06, LEDStates.RENDEZVOUS_IDLE, 0x00);
+                return;
+            }
+
+            EnsureSAS(vessel);
+            if (!vessel.ActionGroups[KSPActionGroup.RCS])
+                vessel.ActionGroups.ToggleGroup(KSPActionGroup.RCS);
+
+            if (FlightGlobals.fetch.VesselTarget != null && vessel.Autopilot.CanSetMode(VesselAutopilot.AutopilotMode.Target))
+                vessel.Autopilot.SetMode(VesselAutopilot.AutopilotMode.Target);
+
+            rendezvousPrevPrecisionMode = FlightInputHandler.fetch.precisionMode;
+            FlightInputHandler.fetch.precisionMode = true;
+
+            rendezvousActive = true;
+            SetLEDState(0x06, LEDStates.RENDEZVOUS_ACTIVE, 0x00);
+        }
+
+        void TickRendezvous()
+        {
+            if (!rendezvousActive)
+                return;
+
+            Vessel vessel = FlightGlobals.ActiveVessel;
+            if (vessel == null)
+                return;
+
+            ITargetable target = FlightGlobals.fetch.VesselTarget;
+            if (target == null)
+            {
+                SetLEDState(0x06, LEDStates.RENDEZVOUS_ACTIVE, 0x00);
+                return;
+            }
+
+            Vector3d relPos = ToVector3d(target.GetTransform().position) - vessel.GetWorldPos3D();
+            Vector3d relVel = vessel.obt_velocity - target.GetObtVelocity();
+            double distance = relPos.magnitude;
+            double closing = distance > 0 ? Vector3d.Dot(relVel, relPos / distance) : 0.0;
+
+            double scaled = Math.Max(0.0, Math.Min(1.0, closing / RENDEZVOUS_MAX_CLOSING_MS));
+            byte data = (byte)Math.Round(scaled * 255.0);
+            byte state = distance < RENDEZVOUS_IN_RANGE_METERS ? LEDStates.RENDEZVOUS_IN_RANGE : LEDStates.RENDEZVOUS_ACTIVE;
+
+            SetLEDState(0x06, state, data);
+        }
+
+        // ------------------------------------------------------------------
+        // AUTO GRAVITY TURN (0x01): toggle. Pitches from AGT_START_PITCH_DEG
+        // at AGT_START_ALTITUDE down to AGT_END_PITCH_DEG at AGT_END_ALTITUDE
+        // (linear in altitude), heading due east. While dynamic pressure is
+        // above AGT_MAX_Q_KPA the commanded direction is held within
+        // AGT_MAX_AOA_DEG of surface prograde to keep aero loads down. Cuts
+        // throttle and ends once apoapsis reaches AGT_TARGET_APOAPSIS,
+        // leaving the circularization to CIRCULARIZE. Doesn't touch the
+        // throttle otherwise.
+        // ------------------------------------------------------------------
+        void DoAutoGravityTurn()
+        {
+            Vessel vessel = FlightGlobals.ActiveVessel;
+            if (vessel == null)
+                return;
+
+            if (agtActive)
+            {
+                StopGravityTurn(vessel, "cancelled by keypress");
+                return;
+            }
+
+            if (IsFlightComputerBusy())
+            {
+                Debug.Log("[KSPMacropad] AUTO GRAVITY TURN: another macro is flying the vessel, ignoring press");
+                return;
+            }
+
+            Vessel.Situations s = vessel.situation;
+            if (s != Vessel.Situations.PRELAUNCH && s != Vessel.Situations.FLYING && s != Vessel.Situations.SUB_ORBITAL)
+            {
+                Debug.Log("[KSPMacropad] AUTO GRAVITY TURN: only runs during ascent");
+                return;
+            }
+
+            EnsureSAS(vessel);
+            vessel.Autopilot.SetMode(VesselAutopilot.AutopilotMode.StabilityAssist);
+            agtActive = true;
+            SetLEDState(0x01, LEDStates.AGT_ACTIVE, 0x00);
+        }
+
+        void TickGravityTurn()
+        {
+            if (!agtActive)
+                return;
+
+            Vessel vessel = FlightGlobals.ActiveVessel;
+            if (vessel == null)
+                return;
+
+            if (vessel.situation == Vessel.Situations.ORBITING || vessel.situation == Vessel.Situations.ESCAPING ||
+                vessel.situation == Vessel.Situations.LANDED || vessel.situation == Vessel.Situations.SPLASHED)
+            {
+                StopGravityTurn(vessel, "left ascent (situation " + vessel.situation + ")");
+                return;
+            }
+
+            if (vessel.orbit.ApA >= AGT_TARGET_APOAPSIS)
+            {
+                FlightInputHandler.state.mainThrottle = 0f;
+                StopGravityTurn(vessel, "target apoapsis reached - press CIRCULARIZE next");
+                return;
+            }
+
+            double pitchDeg = OrbitMath.GravityTurnPitch(vessel.altitude, AGT_START_ALTITUDE, AGT_END_ALTITUDE,
+                AGT_START_PITCH_DEG, AGT_END_PITCH_DEG);
+            double pitch = pitchDeg * Math.PI / 180.0;
+
+            // World-space local frame. Cross(up, north) is east in Unity's
+            // axes (x right when y is up and z is forward).
+            Vector3d up = (vessel.CoMD - vessel.mainBody.position).normalized;
+            Vector3d axis = ToVector3d(vessel.mainBody.transform.up);
+            Vector3d north = (axis - up * Vector3d.Dot(axis, up)).normalized;
+            Vector3d east = Vector3d.Cross(up, north);
+
+            Vector3d direction = up * Math.Sin(pitch) + east * Math.Cos(pitch);
+
+            Vector3d srfVelocity = ToVector3d(vessel.GetSrfVelocity());
+            if (vessel.rootPart != null && vessel.rootPart.dynamicPressurekPa > AGT_MAX_Q_KPA &&
+                srfVelocity.magnitude > AGT_MIN_SRF_SPEED_FOR_AOA)
+            {
+                direction = OrbitMath.LimitAngle(srfVelocity, direction, AGT_MAX_AOA_DEG);
+            }
+
+            // The vessel's nose is ReferenceTransform.up, not forward, so
+            // LookRotation (which aims forward) is followed by a 90 degree
+            // pitch that maps local up onto the aimed direction.
+            Quaternion rotation = Quaternion.LookRotation((Vector3)direction, (Vector3)north) * Quaternion.Euler(90f, 0f, 0f);
+            vessel.Autopilot.SAS.LockRotation(rotation);
+        }
+
+        void StopGravityTurn(Vessel vessel, string reason)
+        {
+            Debug.Log("[KSPMacropad] AUTO GRAVITY TURN: stopped - " + reason);
+            agtActive = false;
+            if (vessel != null)
+                vessel.Autopilot.SetMode(VesselAutopilot.AutopilotMode.StabilityAssist);
+            SetLEDState(0x01, LEDStates.AGT_IDLE, 0x00);
+        }
+
+        // VesselDeltaV.TotalDeltaVActual: "The Total Simulated DeltaV
+        // produced by the Vessel/Ship in flight" (confirmed in the KSP 1.x
+        // API docs). Returns 0 until the stock simulation has run once.
+        double GetVesselDeltaV(Vessel vessel)
+        {
+            if (vessel.VesselDeltaV == null)
+                return 0.0;
+
+            return vessel.VesselDeltaV.TotalDeltaVActual;
+        }
+
+    }
+
+    // Pure orbital-mechanics math with no KSP state access, so it can be
+    // compiled and unit-tested outside the game. Every vector passed in
+    // must be in one consistent frame (the Orbit frame, in practice).
+    internal static class OrbitMath
+    {
+        public static double CircularSpeed(double mu, double r)
+        {
+            return Math.Sqrt(mu / r);
+        }
+
+        public static double VisVivaSpeed(double mu, double r, double a)
+        {
+            return Math.Sqrt(mu * (2.0 / r - 1.0 / a));
+        }
+
+        public static double SynodicPeriod(double periodA, double periodB)
+        {
+            if (periodA <= 0 || periodB <= 0 || Math.Abs(periodA - periodB) < 1e-6)
+                return Math.Max(periodA, periodB); // degenerate - fall back rather than dividing by ~0
+            return Math.Abs(1.0 / (1.0 / periodA - 1.0 / periodB));
+        }
+
+        public static double AngleDeg(Vector3d a, Vector3d b)
+        {
+            double d = Vector3d.Dot(a.normalized, b.normalized);
+            return Math.Acos(Math.Max(-1.0, Math.Min(1.0, d))) * 180.0 / Math.PI;
+        }
+
+        public static Vector3d SwapYZ(Vector3d v)
+        {
+            return new Vector3d(v.x, v.z, v.y);
+        }
+
+        // Unit vector along the velocity with its radial component removed.
+        public static Vector3d Horizontal(Vector3d pos, Vector3d vel)
+        {
+            Vector3d rHat = pos.normalized;
+            return (vel - rHat * Vector3d.Dot(vel, rHat)).normalized;
+        }
+
+        // dv that rotates vel into the plane with the given normal, keeping
+        // its magnitude. Sign of planeNormal doesn't matter.
+        public static Vector3d PlaneMatchDv(Vector3d vel, Vector3d planeNormal)
+        {
+            Vector3d n = planeNormal.normalized;
+            Vector3d inPlane = vel - n * Vector3d.Dot(vel, n);
+            return inPlane.normalized * vel.magnitude - vel;
+        }
+
+        // Splits dv into radial-out (perpendicular to velocity, in the
+        // orbital plane), normal (along pos x vel) and prograde components.
+        public static void DecomposeBurn(Vector3d pos, Vector3d vel, Vector3d dv,
+            out double radial, out double normal, out double prograde)
+        {
+            Vector3d pro = vel.normalized;
+            Vector3d rad = (pos - pro * Vector3d.Dot(pos, pro)).normalized;
+            Vector3d nrm = Vector3d.Cross(pos, vel).normalized;
+            radial = Vector3d.Dot(dv, rad);
+            normal = Vector3d.Dot(dv, nrm);
+            prograde = Vector3d.Dot(dv, pro);
+        }
+
+        // Periapsis radius of the conic through (pos, vel): p / (1 + e).
+        // Valid for elliptic, parabolic and hyperbolic orbits alike.
+        public static double PeriapsisRadius(Vector3d pos, Vector3d vel, double mu)
+        {
+            double r = pos.magnitude;
+            double energy = Vector3d.Dot(vel, vel) / 2.0 - mu / r;
+            double h = Vector3d.Cross(pos, vel).magnitude;
+            double e = Math.Sqrt(Math.Max(0.0, 1.0 + 2.0 * energy * h * h / (mu * mu)));
+            return h * h / (mu * (1.0 + e));
+        }
+
+        // Returns `to`, or if it's more than maxDeg from `from`, the unit
+        // vector maxDeg away from `from` toward `to`.
+        public static Vector3d LimitAngle(Vector3d from, Vector3d to, double maxDeg)
+        {
+            Vector3d f = from.normalized;
+            Vector3d t = to.normalized;
+            if (AngleDeg(f, t) <= maxDeg)
+                return t;
+
+            Vector3d perp = t - f * Vector3d.Dot(t, f);
+            if (perp.magnitude < 1e-9)
+                return f; // exactly opposite - no defined direction to rotate toward
+
+            double m = maxDeg * Math.PI / 180.0;
+            return f * Math.Cos(m) + perp.normalized * Math.Sin(m);
+        }
+
+        public static double GravityTurnPitch(double altitude, double startAltitude, double endAltitude,
+            double startPitch, double endPitch)
+        {
+            if (altitude <= startAltitude)
+                return startPitch;
+            if (altitude >= endAltitude)
+                return endPitch;
+            return startPitch + (endPitch - startPitch) * (altitude - startAltitude) / (endAltitude - startAltitude);
+        }
+
+        // Scans [t0, t1] in `samples` steps for the first sign change of f
+        // and bisects it down. Returns false if f never changes sign.
+        public static bool FindFirstSignChange(Func<double, double> f, double t0, double t1, int samples, out double root)
+        {
+            root = 0;
+            double prevT = t0;
+            double prevF = f(t0);
+
+            for (int i = 1; i <= samples; i++)
+            {
+                double t = t0 + (t1 - t0) * i / samples;
+                double ft = f(t);
+
+                if ((prevF < 0) != (ft < 0))
+                {
+                    double lo = prevT, hi = t, fLo = prevF;
+                    for (int k = 0; k < 60; k++)
+                    {
+                        double mid = (lo + hi) / 2.0;
+                        double fMid = f(mid);
+                        if ((fMid < 0) == (fLo < 0))
+                        {
+                            lo = mid;
+                            fLo = fMid;
+                        }
+                        else
+                        {
+                            hi = mid;
+                        }
+                    }
+                    root = (lo + hi) / 2.0;
+                    return true;
+                }
+
+                prevT = t;
+                prevF = ft;
+            }
+
+            return false;
+        }
+
+        // Universal-variable Lambert solver (single revolution, prograde
+        // with respect to refNormal). Solves for the transfer-orbit
+        // velocities connecting r1vec to r2vec in time tof. Finds the root
+        // of the Stumpff-function time equation by scanning the valid
+        // z-range for a sign change and bisecting, rather than Newton with a
+        // hand-derived derivative. Returns false for a near-180-degree
+        // transfer angle (singular for this method) or if no root is found.
+        public static bool SolveLambert(Vector3d r1vec, Vector3d r2vec, double tof, double mu, Vector3d refNormal,
+            out Vector3d v1, out Vector3d v2)
         {
             v1 = Vector3d.zero;
             v2 = Vector3d.zero;
@@ -1127,16 +2006,15 @@ namespace KSPMacropad
             double r1 = r1vec.magnitude;
             double r2 = r2vec.magnitude;
 
-            double crossZ = r1vec.x * r2vec.y - r1vec.y * r2vec.x;
             double cosDnu = Vector3d.Dot(r1vec, r2vec) / (r1 * r2);
             cosDnu = Math.Max(-1.0, Math.Min(1.0, cosDnu));
             double dnu = Math.Acos(cosDnu);
-            if (crossZ < 0)
+            if (Vector3d.Dot(Vector3d.Cross(r1vec, r2vec), refNormal) < 0)
                 dnu = 2.0 * Math.PI - dnu;
 
             double A = Math.Sin(dnu) * Math.Sqrt(r1 * r2 / (1.0 - Math.Cos(dnu)));
             if (Math.Abs(A) < 1e-6)
-                return false; // near-180-degree transfer angle - singular for this method
+                return false;
 
             double zScanLo = -4.0 * Math.PI * Math.PI + 1e-6;
             double zScanHi = 4.0 * Math.PI * Math.PI - 1e-6;
@@ -1158,13 +2036,16 @@ namespace KSPMacropad
 
                 if (havePrev && (prevF < 0) != (Fz < 0))
                 {
-                    bracketLoZ = prevZ; bracketLoF = prevF;
+                    bracketLoZ = prevZ;
+                    bracketLoF = prevF;
                     bracketHiZ = z;
                     haveBracket = true;
                     break;
                 }
 
-                prevZ = z; prevF = Fz; havePrev = true;
+                prevZ = z;
+                prevF = Fz;
+                havePrev = true;
             }
 
             if (!haveBracket)
@@ -1188,7 +2069,8 @@ namespace KSPMacropad
                 }
                 if ((fMid < 0) == (fLow < 0))
                 {
-                    zLow = zMid; fLow = fMid;
+                    zLow = zMid;
+                    fLow = fMid;
                 }
                 else
                 {
@@ -1197,7 +2079,8 @@ namespace KSPMacropad
             }
 
             double zFinal = (zLow + zHigh) / 2.0;
-            if (!LambertY(zFinal, r1, r2, A, out double yFinal) || yFinal < 0)
+            double yFinal = LambertY(zFinal, r1, r2, A);
+            if (yFinal < 0)
                 return false;
 
             double f = 1.0 - yFinal / r1;
@@ -1209,27 +2092,23 @@ namespace KSPMacropad
             return true;
         }
 
-        bool LambertY(double z, double r1, double r2, double A, out double y)
+        static double LambertY(double z, double r1, double r2, double A)
         {
-            double Cz = StumpffC(z);
-            double Sz = StumpffS(z);
-            y = r1 + r2 + A * (z * Sz - 1.0) / Math.Sqrt(Cz);
-            return true;
+            return r1 + r2 + A * (z * StumpffS(z) - 1.0) / Math.Sqrt(StumpffC(z));
         }
 
-        bool LambertF(double z, double r1, double r2, double A, double mu, double tof, out double F)
+        static bool LambertF(double z, double r1, double r2, double A, double mu, double tof, out double F)
         {
             F = 0;
-            if (!LambertY(z, r1, r2, A, out double y) || y < 0)
+            double y = LambertY(z, r1, r2, A);
+            if (y < 0)
                 return false;
 
-            double Cz = StumpffC(z);
-            double Sz = StumpffS(z);
-            F = Math.Pow(y / Cz, 1.5) * Sz + A * Math.Sqrt(y) - Math.Sqrt(mu) * tof;
+            F = Math.Pow(y / StumpffC(z), 1.5) * StumpffS(z) + A * Math.Sqrt(y) - Math.Sqrt(mu) * tof;
             return true;
         }
 
-        double StumpffC(double z)
+        static double StumpffC(double z)
         {
             if (z > 1e-6)
                 return (1.0 - Math.Cos(Math.Sqrt(z))) / z;
@@ -1238,7 +2117,7 @@ namespace KSPMacropad
             return 0.5 - z / 24.0 + z * z / 720.0;
         }
 
-        double StumpffS(double z)
+        static double StumpffS(double z)
         {
             if (z > 1e-6)
             {
@@ -1252,27 +2131,5 @@ namespace KSPMacropad
             }
             return 1.0 / 6.0 - z / 120.0 + z * z / 5040.0;
         }
-
-        // STILL UNCONFIRMED after actually checking: every other API call
-        // in this file that was flagged UNVERIFIED got checked against the
-        // real KSP API docs and either confirmed or fixed (see git history/
-        // comments above). This one didn't - the old fan-maintained API
-        // doc site used for those checks predates stock KSP's dV readout
-        // (added ~1.11), and the GitHub source that would confirm the
-        // exact field name (kOS's own delta-v reader, PR #2719) couldn't be
-        // fetched from here. vessel.VesselDeltaV.TotalDeltaVActual is a
-        // reasonable guess at the real name, not a confirmed one - check it
-        // against Assembly-CSharp (e.g. with ILSpy/dnSpy) or that kOS PR
-        // before trusting it.
-        double GetVesselDeltaV(Vessel vessel)
-        {
-            if (vessel.VesselDeltaV == null)
-                return 0.0;
-
-            return vessel.VesselDeltaV.TotalDeltaVActual;
-        }
-
     }
-
-
 }
