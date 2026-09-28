@@ -1,6 +1,6 @@
 # ============================================================================
 # KSP MacroPad — Firmware (CircuitPython)
-# Version: 0.2.0
+# Version: 0.2.1
 # ============================================================================
 
 import time
@@ -35,6 +35,14 @@ HIGH_MAX = 2.3
 DEBOUNCE_COUNT = 4      # consecutive stable reads required before a key registers
 COUNTS_PER_DETENT = 4   # raw encoder counts per physical detent click
 NUM_LEDS = 20           # total pixels in the NeoPixel chain
+
+LOOP_INTERVAL = 0.01    # seconds per main loop tick
+
+# SUICIDE BURN ARM is the one macro that needs a safety hold, not a tap:
+# a plain press/release never fires it, only a continuous hold does.
+SUICIDE_ARM_KEY = 0x0A
+SUICIDE_ARM_HOLD_SECONDS = 1.0
+SUICIDE_ARM_HOLD_TICKS = int(SUICIDE_ARM_HOLD_SECONDS / LOOP_INTERVAL)
 
 OLED_WIDTH = 128
 OLED_HEIGHT = 32
@@ -260,7 +268,13 @@ def read_key():
 
 
 def poll_key():
-    """Debounced key read. Returns a key_id only on a new, stable press."""
+    """Debounced key read. Returns a key_id only on a new, stable press.
+
+    SUICIDE_ARM_KEY is the exception: it needs SUICIDE_ARM_HOLD_TICKS of
+    continuous hold (not just DEBOUNCE_COUNT) before it fires. Releasing
+    early resets _stable_count back to 0 on the next differing read, so
+    an early release simply never reaches the threshold — no separate
+    cancel signal needed."""
     global _stable_key, _stable_count, _reported_key
 
     current = read_key()
@@ -271,7 +285,8 @@ def poll_key():
         _stable_key = current
         _stable_count = 1
 
-    if _stable_count < DEBOUNCE_COUNT:
+    required = SUICIDE_ARM_HOLD_TICKS if _stable_key == SUICIDE_ARM_KEY else DEBOUNCE_COUNT
+    if _stable_count < required:
         return None
 
     if _stable_key != _reported_key:
@@ -477,4 +492,4 @@ while True:
         _last_connected = connected
         update_display()
 
-    time.sleep(0.01)
+    time.sleep(LOOP_INTERVAL)
