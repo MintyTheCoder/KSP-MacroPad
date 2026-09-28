@@ -1,15 +1,20 @@
 # ============================================================================
 # KSP MacroPad — Firmware (CircuitPython)
-# Version: 0.1.0
+# Version: 0.2.0
 # ============================================================================
 
 import time
 
 import board
 import analogio
+import busio
 import rotaryio
 import neopixel
 import usb_cdc
+import displayio
+import terminalio
+from adafruit_display_text import label
+import adafruit_displayio_ssd1306
 
 from led_states import LEDStates
 
@@ -31,6 +36,18 @@ DEBOUNCE_COUNT = 4      # consecutive stable reads required before a key registe
 COUNTS_PER_DETENT = 4   # raw encoder counts per physical detent click
 NUM_LEDS = 20           # total pixels in the NeoPixel chain
 
+OLED_WIDTH = 128
+OLED_HEIGHT = 32
+BOOT_SPLASH_SECONDS = 1.2
+
+# Reserved inbound IDs outside the key (0x00-0x0F) / underglow (0x10-0x13)
+# ranges — same 5-byte packet frame, just new meanings for id/state/data.
+HEARTBEAT_ID = 0x14           # mod->pad, sent periodically regardless of state change
+THROTTLE_TELEMETRY_ID = 0x15  # data = live throttle % (0-100)
+WARP_TELEMETRY_ID = 0x16      # data = live warp index (mod-defined 0-255 lookup)
+
+HEARTBEAT_TIMEOUT = 3.0   # seconds since last heartbeat before we call it disconnected
+
 
 # ----------------------------------------------------------------------------
 # Hardware setup
@@ -44,12 +61,32 @@ right_enc = rotaryio.IncrementalEncoder(board.D7, board.D8)
 
 pixels = neopixel.NeoPixel(board.D6, NUM_LEDS, auto_write=False)
 
+displayio.release_displays()
+_i2c = busio.I2C(board.D1, board.D0)   # SCL, SDA
+_display_bus = displayio.I2CDisplay(_i2c, device_address=0x3C)
+display = adafruit_displayio_ssd1306.SSD1306(_display_bus, width=OLED_WIDTH, height=OLED_HEIGHT)
+
 
 # ----------------------------------------------------------------------------
 # Runtime state
 # ----------------------------------------------------------------------------
 
 encoder_mode = 1   # 1 = normal, 2 = precision input, 3 = aux mode
+
+# Locally-dialed target values for modes 2/3 (pre-commit, display-only —
+# not the mod's authoritative state). Indexed by mode.
+dial_targets = {
+    2: {"left": 0, "right": 0},   # left = target throttle % (0-100), right = target heading deg (0-359)
+    3: {"left": 0, "right": 0},   # left = camera zoom (unclamped), right = RCS thrust limiter % (0-100)
+}
+
+# Mode 1 live telemetry, confirmed by the mod (see THROTTLE/WARP_TELEMETRY_ID
+# below) — None until the first packet of that type arrives.
+live_throttle = None
+live_warp = None
+
+_last_heartbeat = None      # time.monotonic() of the last heartbeat, None = never seen one
+_last_connected = False     # last displayed connection state, so update_display only fires on change
 
 _stable_key = None
 _stable_count = 0
@@ -292,10 +329,11 @@ def send_encoder_packet(encoder_id, steps):
 # ----------------------------------------------------------------------------
 # Serial protocol — inbound (mod -> pad)
 # ----------------------------------------------------------------------------
-# Packet format: [0x77, led_id, state, data, 0x44]
+# Packet format: [0x77, id, state, data, 0x44] — shared frame for LED
+# updates, telemetry (THROTTLE/WARP_TELEMETRY_ID), and HEARTBEAT_ID.
 
-def read_led_packet():
-    """Pull one complete LED packet off the serial buffer, if available."""
+def read_inbound_packet():
+    """Pull one complete inbound packet off the serial buffer, if available."""
     global _in_buf
     if serial.in_waiting > 0:
         _in_buf += serial.read(serial.in_waiting)
@@ -307,9 +345,9 @@ def read_led_packet():
         if _in_buf[4] != 0x44:
             _in_buf = _in_buf[1:]
             continue
-        led_id, state, data = _in_buf[1], _in_buf[2], _in_buf[3]
+        packet_id, state, data = _in_buf[1], _in_buf[2], _in_buf[3]
         _in_buf = _in_buf[5:]
-        return led_id, state, data
+        return packet_id, state, data
 
     return None
 
@@ -330,8 +368,56 @@ def apply_led_update(led_id, state, data):
 
 
 # ----------------------------------------------------------------------------
+# OLED display
+# ----------------------------------------------------------------------------
+# Line 1: connection status (from HEARTBEAT_ID) + current encoder mode.
+# Line 2: mode 1 shows mod-confirmed live throttle/warp (THROTTLE/WARP_
+# TELEMETRY_ID) once received; modes 2/3 show the locally-dialed target
+# values (pre-commit, not yet sent to the mod as a "final" value).
+
+def show_boot_splash():
+    splash = displayio.Group()
+    splash.append(label.Label(terminalio.FONT, text="KSP MACROPAD", x=8, y=16))
+    display.root_group = splash
+    time.sleep(BOOT_SPLASH_SECONDS)
+
+
+line1 = label.Label(terminalio.FONT, text="", x=0, y=8)
+line2 = label.Label(terminalio.FONT, text="", x=0, y=24)
+
+main_group = displayio.Group()
+main_group.append(line1)
+main_group.append(line2)
+
+
+def update_display():
+    """Refresh both OLED lines from current mode/dial/telemetry/connection
+    state. Call only on a state change (mode toggle, nonzero encoder step,
+    telemetry packet, or a connection-status flip) — not every loop tick,
+    since each text assignment triggers a redraw."""
+    conn_text = "CONN" if _last_connected else "NO CONN"
+    line1.text = "{} MODE {}".format(conn_text, encoder_mode)
+
+    if encoder_mode == 1:
+        if live_throttle is None or live_warp is None:
+            line2.text = "--"   # no telemetry received yet
+        else:
+            line2.text = "THR {:>3}% WARP {}".format(live_throttle, live_warp)
+    elif encoder_mode == 2:
+        t = dial_targets[2]
+        line2.text = "THR {:>3}% HDG {:>3}".format(t["left"], t["right"])
+    elif encoder_mode == 3:
+        t = dial_targets[3]
+        line2.text = "ZOOM {:>3} RCS {:>3}%".format(t["left"], t["right"])
+
+
+# ----------------------------------------------------------------------------
 # Main loop
 # ----------------------------------------------------------------------------
+
+show_boot_splash()
+display.root_group = main_group
+update_display()
 
 while True:
     key = poll_key()
@@ -341,17 +427,54 @@ while True:
         # mode 1 on a second press.
         if key == 0x0B:
             encoder_mode = 1 if encoder_mode == 2 else 2
+            update_display()
         elif key == 0x0E:
             encoder_mode = 1 if encoder_mode == 3 else 3
+            update_display()
 
     left_steps, right_steps = poll_encoders()
     if left_steps != 0:
         send_encoder_packet((encoder_mode << 4) | 0x1, left_steps)
+        if encoder_mode == 2:
+            t = dial_targets[2]
+            t["left"] = max(0, min(100, t["left"] + left_steps))
+            update_display()
+        elif encoder_mode == 3:
+            dial_targets[3]["left"] += left_steps   # zoom: unclamped
+            update_display()
+
     if right_steps != 0:
         send_encoder_packet((encoder_mode << 4) | 0x2, right_steps)
+        if encoder_mode == 2:
+            t = dial_targets[2]
+            t["right"] = (t["right"] + right_steps) % 360
+            update_display()
+        elif encoder_mode == 3:
+            t = dial_targets[3]
+            t["right"] = max(0, min(100, t["right"] + right_steps))
+            update_display()
 
-    led_packet = read_led_packet()
-    if led_packet is not None:
-        apply_led_update(*led_packet)
+    inbound = read_inbound_packet()
+    if inbound is not None:
+        packet_id, state, data = inbound
+        if packet_id == HEARTBEAT_ID:
+            _last_heartbeat = time.monotonic()
+        elif packet_id == THROTTLE_TELEMETRY_ID:
+            live_throttle = data
+            if encoder_mode == 1:
+                update_display()
+        elif packet_id == WARP_TELEMETRY_ID:
+            live_warp = data
+            if encoder_mode == 1:
+                update_display()
+        else:
+            apply_led_update(packet_id, state, data)
+
+    # Connection status can lapse without a new packet ever arriving, so
+    # check the heartbeat timeout every tick, not just on packet receipt.
+    connected = _last_heartbeat is not None and (time.monotonic() - _last_heartbeat) < HEARTBEAT_TIMEOUT
+    if connected != _last_connected:
+        _last_connected = connected
+        update_display()
 
     time.sleep(0.01)
