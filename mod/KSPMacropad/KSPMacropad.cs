@@ -58,7 +58,7 @@ namespace KSPMacropad
         private bool suicideBurnArmed = false;
         private bool resourceMonitorPanelOpen = false;
 
-        // AUTOPILOT state machine (see DoAutopilot/TickAutopilot below).
+        // AUTOPILOT state machine (see StartAutopilot/TickAutopilot below).
         private enum AutopilotPhase
         {
             Idle,
@@ -77,6 +77,13 @@ namespace KSPMacropad
         private double autopilotTransferTime;
         private double autopilotDeadlineUT; // abort if we blow past this without reaching the destination SOI
         private const double AUTOPILOT_DV_EPSILON = 0.1; // m/s - burn considered "done" below this
+
+        // Flying-macro queue (see RequestFlyingMacro). Only one macro flies
+        // the vessel at a time; key presses for others while busy wait here.
+        private enum MacroStart { Started, Done, Failed }
+        private const byte NO_MACRO = 0xFF;
+        private byte activeMacroKey = NO_MACRO;
+        private readonly List<byte> macroQueue = new List<byte>();
 
         // Shared single-node burn executor used by CIRCULARIZE, DEORBIT,
         // INTERCEPT and ORBIT SYNC (see StartNodeJob/TickNodeJob).
@@ -166,12 +173,12 @@ namespace KSPMacropad
                                 break;
                             case 0x01:
                                 Debug.Log("[KSPMacropad] KEY PRESSED: AUTO GRAVITY TURN");
-                                DoAutoGravityTurn();
+                                RequestFlyingMacro(0x01);
                                 break;
 
                             case 0x02:
                                 Debug.Log("[KSPMacropad] KEY PRESSED: CIRCULARIZE");
-                                DoCircularize();
+                                RequestFlyingMacro(0x02);
                                 break;
 
                             case 0x03:
@@ -181,12 +188,12 @@ namespace KSPMacropad
 
                             case 0x04:
                                 Debug.Log("[KSPMacropad] KEY PRESSED: INTERCEPT CALCULATION");
-                                DoInterceptCalc();
+                                RequestFlyingMacro(0x04);
                                 break;
 
                             case 0x05:
                                 Debug.Log("[KSPMacropad] KEY PRESSED: ORBIT SYNC");
-                                DoOrbitSync();
+                                RequestFlyingMacro(0x05);
                                 break;
 
                             case 0x06:
@@ -196,7 +203,7 @@ namespace KSPMacropad
 
                             case 0x07:
                                 Debug.Log("[KSPMacropad] KEY PRESSED: DEORBIT BURN");
-                                DoDeorbitBurn();
+                                RequestFlyingMacro(0x07);
                                 break;
 
                             case 0x08:
@@ -236,7 +243,7 @@ namespace KSPMacropad
 
                             case 0x0F:
                                 Debug.Log("[KSPMacropad] KEY PRESSED: AUTOPILOT");
-                                DoAutopilot();
+                                RequestFlyingMacro(0x0F);
                                 break;
                         }
 
@@ -732,30 +739,18 @@ namespace KSPMacropad
         //     velocity vectors read from Orbit methods share one frame and
         //     can be combined directly. Documented for the class as a whole,
         //     not per-method - recheck once this runs against KSP.
-        void DoAutopilot()
+        MacroStart StartAutopilot()
         {
             Vessel vessel = FlightGlobals.ActiveVessel;
             if (vessel == null)
-                return;
-
-            if (autopilotPhase != AutopilotPhase.Idle)
-            {
-                Debug.Log("[KSPMacropad] AUTOPILOT: transfer already in progress, ignoring press");
-                return;
-            }
-
-            if (IsFlightComputerBusy())
-            {
-                Debug.Log("[KSPMacropad] AUTOPILOT: another macro is flying the vessel, ignoring press");
-                return;
-            }
+                return MacroStart.Failed;
 
             ITargetable target = FlightGlobals.fetch.VesselTarget;
             if (target == null)
             {
                 Debug.Log("[KSPMacropad] AUTOPILOT: no target selected, nothing to plan against");
                 SetLEDState(0x0F, LEDStates.AUTOPILOT_IDLE, 0x00);
-                return;
+                return MacroStart.Failed;
             }
 
             CelestialBody destinationBody = target as CelestialBody;
@@ -766,7 +761,7 @@ namespace KSPMacropad
             {
                 Debug.Log("[KSPMacropad] AUTOPILOT: target has no resolvable body");
                 SetLEDState(0x0F, LEDStates.AUTOPILOT_IDLE, 0x00);
-                return;
+                return MacroStart.Failed;
             }
 
             CelestialBody originBody = vessel.mainBody;
@@ -775,7 +770,7 @@ namespace KSPMacropad
             {
                 Debug.Log("[KSPMacropad] AUTOPILOT: target is in the same SOI, not an interplanetary case");
                 SetLEDState(0x0F, LEDStates.AUTOPILOT_IDLE, 0x00);
-                return;
+                return MacroStart.Failed;
             }
 
             // MVP only handles "vessel orbiting a planet, transferring to
@@ -785,7 +780,7 @@ namespace KSPMacropad
             {
                 Debug.Log("[KSPMacropad] AUTOPILOT: origin body's parent isn't the Sun - unsupported case for this MVP");
                 SetLEDState(0x0F, LEDStates.AUTOPILOT_IDLE, 0x00);
-                return;
+                return MacroStart.Failed;
             }
 
             bool foundWindow = FindBestTransferWindow(vessel, originBody, destinationBody,
@@ -795,7 +790,7 @@ namespace KSPMacropad
             {
                 Debug.Log("[KSPMacropad] AUTOPILOT: no valid transfer window found in the search window");
                 SetLEDState(0x0F, LEDStates.AUTOPILOT_IMPOSSIBLE, 0x00);
-                return;
+                return MacroStart.Failed;
             }
 
             double requiredDv = ejectionDv + captureDv;
@@ -808,7 +803,7 @@ namespace KSPMacropad
             if (availableDv < requiredDv)
             {
                 SetLEDState(0x0F, LEDStates.AUTOPILOT_IMPOSSIBLE, 0x00);
-                return;
+                return MacroStart.Failed;
             }
 
             // Sufficient dv and a real departure window - kick off the
@@ -828,6 +823,7 @@ namespace KSPMacropad
 
             SetLEDState(0x0F, LEDStates.AUTOPILOT_PLANNING, 0x00);
             WarpToBurn(departureUT);
+            return MacroStart.Started;
         }
 
         // Drives the AUTOPILOT state machine forward one tick. No-op when
@@ -846,7 +842,7 @@ namespace KSPMacropad
             if (currentUT > autopilotDeadlineUT)
             {
                 AbortAutopilot(vessel, "exceeded expected transfer time without reaching the destination SOI " +
-                    "(ejection burn pointing is prograde-only - see caveats on DoAutopilot)");
+                    "(ejection burn pointing is prograde-only - see caveats on StartAutopilot)");
                 return;
             }
 
@@ -928,6 +924,7 @@ namespace KSPMacropad
                         autopilotDestination = null;
                         autopilotPhase = AutopilotPhase.Idle;
                         SetLEDState(0x0F, LEDStates.AUTOPILOT_IDLE, 0x00);
+                        OnMacroFinished(0x0F, true);
                     }
                     break;
             }
@@ -970,6 +967,7 @@ namespace KSPMacropad
             autopilotDestination = null;
             autopilotPhase = AutopilotPhase.Idle;
             SetLEDState(0x0F, LEDStates.AUTOPILOT_IDLE, 0x00);
+            OnMacroFinished(0x0F, false);
         }
 
         // ------------------------------------------------------------------
@@ -1066,7 +1064,7 @@ namespace KSPMacropad
 
         // dv from a circular parking orbit around originBody up to
         // hyperbolic excess speed vInf (magnitude only - see the
-        // pointing-error caveat on DoAutopilot).
+        // pointing-error caveat on StartAutopilot).
         double VInfToEjectionDv(Vessel vessel, CelestialBody originBody, double vInf)
         {
             double muOrigin = originBody.gravParameter;
@@ -1094,7 +1092,148 @@ namespace KSPMacropad
 
         bool IsFlightComputerBusy()
         {
-            return autopilotPhase != AutopilotPhase.Idle || nodeJobPhase != NodeJobPhase.None || agtActive;
+            return activeMacroKey != NO_MACRO;
+        }
+
+        // ------------------------------------------------------------------
+        // Flying-macro queue. AGT, CIRCULARIZE, INTERCEPT, ORBIT SYNC,
+        // DEORBIT and AUTOPILOT all take over throttle and SAS, so only one
+        // runs at a time. Pressing one of those keys:
+        //   - while it's the one running: cancels it
+        //   - while it's already queued: removes it from the queue
+        //   - while another is running: adds it to the end of the queue
+        //   - otherwise: starts it now
+        // Queued macros are planned when they start, not when queued, so
+        // each one works from the orbit the previous one actually left.
+        // When the running macro succeeds the next one starts; when it
+        // fails or is cancelled the whole queue is cleared, so a chain
+        // never continues past a step that didn't happen.
+        // ------------------------------------------------------------------
+        void RequestFlyingMacro(byte keyId)
+        {
+            if (activeMacroKey == keyId)
+            {
+                CancelActiveMacro();
+                return;
+            }
+
+            if (macroQueue.Remove(keyId))
+            {
+                Debug.Log("[KSPMacropad] QUEUE: removed " + MacroName(keyId));
+                return;
+            }
+
+            if (IsFlightComputerBusy())
+            {
+                macroQueue.Add(keyId);
+                Debug.Log("[KSPMacropad] QUEUE: " + MacroName(keyId) + " queued behind " + MacroName(activeMacroKey) +
+                    " (position " + macroQueue.Count + ")");
+                return;
+            }
+
+            StartFlyingMacro(keyId, false);
+        }
+
+        MacroStart StartFlyingMacro(byte keyId, bool fromQueue)
+        {
+            // Any other macro changes the orbit a planned-but-unflown
+            // intercept was computed from, so that plan is dropped.
+            if (keyId != 0x04)
+                DiscardPlannedIntercept();
+
+            MacroStart result;
+            switch (keyId)
+            {
+                case 0x01: result = StartAutoGravityTurn(); break;
+                case 0x02: result = StartCircularize(); break;
+                case 0x04: result = StartInterceptCalc(fromQueue); break;
+                case 0x05: result = StartOrbitSync(); break;
+                case 0x07: result = StartDeorbitBurn(); break;
+                case 0x0F: result = StartAutopilot(); break;
+                default: result = MacroStart.Failed; break;
+            }
+
+            if (result == MacroStart.Started)
+                activeMacroKey = keyId;
+
+            return result;
+        }
+
+        // Called exactly once by each flying macro when it ends.
+        void OnMacroFinished(byte keyId, bool success)
+        {
+            if (activeMacroKey != keyId)
+                return;
+
+            activeMacroKey = NO_MACRO;
+
+            if (!success)
+            {
+                if (macroQueue.Count > 0)
+                {
+                    Debug.Log("[KSPMacropad] QUEUE: " + MacroName(keyId) + " didn't finish, clearing " +
+                        macroQueue.Count + " queued macro(s)");
+                    macroQueue.Clear();
+                }
+                return;
+            }
+
+            while (macroQueue.Count > 0)
+            {
+                byte next = macroQueue[0];
+                macroQueue.RemoveAt(0);
+                Debug.Log("[KSPMacropad] QUEUE: starting " + MacroName(next));
+
+                MacroStart result = StartFlyingMacro(next, true);
+                if (result == MacroStart.Started)
+                    return;
+
+                if (result == MacroStart.Failed)
+                {
+                    Debug.Log("[KSPMacropad] QUEUE: " + MacroName(next) + " couldn't start, clearing the rest of the queue");
+                    macroQueue.Clear();
+                    return;
+                }
+                // Done: nothing needed flying (e.g. orbit already synced) - move on.
+            }
+        }
+
+        void CancelActiveMacro()
+        {
+            Vessel vessel = FlightGlobals.ActiveVessel;
+            switch (activeMacroKey)
+            {
+                case 0x01: StopGravityTurn(vessel, "cancelled by keypress", false); break;
+                case 0x0F: AbortAutopilot(vessel, "cancelled by keypress"); break;
+                default: CancelNodeJob("cancelled by keypress"); break;
+            }
+        }
+
+        static string MacroName(byte keyId)
+        {
+            switch (keyId)
+            {
+                case 0x01: return "AUTO GRAVITY TURN";
+                case 0x02: return "CIRCULARIZE";
+                case 0x04: return "INTERCEPT";
+                case 0x05: return "ORBIT SYNC";
+                case 0x07: return "DEORBIT";
+                case 0x0F: return "AUTOPILOT";
+                default: return "0x" + keyId.ToString("X2");
+            }
+        }
+
+        void DiscardPlannedIntercept()
+        {
+            if (interceptPlannedNode == null)
+                return;
+
+            Vessel vessel = FlightGlobals.ActiveVessel;
+            if (vessel != null && vessel.patchedConicSolver.maneuverNodes.Contains(interceptPlannedNode))
+                vessel.patchedConicSolver.RemoveManeuverNode(interceptPlannedNode);
+
+            interceptPlannedNode = null;
+            SetLEDState(0x04, LEDStates.INTERCEPT_IDLE, 0x00);
         }
 
         static Vector3d ToVector3d(Vector3 v)
@@ -1275,22 +1414,13 @@ namespace KSPMacropad
             if (vessel != null && nodeJobNode != null && vessel.patchedConicSolver.maneuverNodes.Contains(nodeJobNode))
                 vessel.patchedConicSolver.RemoveManeuverNode(nodeJobNode);
 
-            SetLEDState(nodeJobKeyId, nodeJobIdleState, 0x00);
+            byte cancelledKey = nodeJobKeyId;
+            SetLEDState(cancelledKey, nodeJobIdleState, 0x00);
             nodeJobPhase = NodeJobPhase.None;
             nodeJobNode = null;
             nodeJobOnComplete = null;
             activeBurnNode = null;
-        }
-
-        // A second press of the key that owns the running burn cancels it.
-        // Returns true if the press was consumed that way.
-        bool CancelIfOwnJobRunning(byte keyId)
-        {
-            if (nodeJobPhase == NodeJobPhase.None || nodeJobKeyId != keyId)
-                return false;
-
-            CancelNodeJob("cancelled by keypress");
-            return true;
+            OnMacroFinished(cancelledKey, false);
         }
 
         bool HasDeltaVFor(Vessel vessel, double requiredDv, string macroName)
@@ -1306,17 +1436,11 @@ namespace KSPMacropad
         // ------------------------------------------------------------------
         // CIRCULARIZE (0x02): circularize at the next apoapsis.
         // ------------------------------------------------------------------
-        void DoCircularize()
+        MacroStart StartCircularize()
         {
             Vessel vessel = FlightGlobals.ActiveVessel;
-            if (vessel == null || CancelIfOwnJobRunning(0x02))
-                return;
-
-            if (IsFlightComputerBusy())
-            {
-                Debug.Log("[KSPMacropad] CIRCULARIZE: another macro is flying the vessel, ignoring press");
-                return;
-            }
+            if (vessel == null)
+                return MacroStart.Failed;
 
             Orbit orbit = vessel.orbit;
             CelestialBody body = vessel.mainBody;
@@ -1327,14 +1451,14 @@ namespace KSPMacropad
             {
                 Debug.Log("[KSPMacropad] CIRCULARIZE: no apoapsis to circularize at");
                 SetLEDState(0x02, LEDStates.CIRC_UNAVAILABLE, 0x00);
-                return;
+                return MacroStart.Failed;
             }
 
             if (body.atmosphere && orbit.ApA < body.atmosphereDepth)
             {
                 Debug.Log("[KSPMacropad] CIRCULARIZE: apoapsis is inside the atmosphere");
                 SetLEDState(0x02, LEDStates.CIRC_UNAVAILABLE, 0x00);
-                return;
+                return MacroStart.Failed;
             }
 
             SetLEDState(0x02, LEDStates.CIRC_CALCULATING, 0x00);
@@ -1345,7 +1469,7 @@ namespace KSPMacropad
             if (!HasDeltaVFor(vessel, dv.magnitude, "CIRCULARIZE"))
             {
                 SetLEDState(0x02, LEDStates.CIRC_UNAVAILABLE, 0x00);
-                return;
+                return MacroStart.Failed;
             }
 
             ManeuverNode node = vessel.patchedConicSolver.AddManeuverNode(burnUT);
@@ -1353,7 +1477,12 @@ namespace KSPMacropad
 
             // CIRC has no dedicated burning state - WARPING stays lit through the burn.
             StartNodeJob(vessel, node, 0x02, LEDStates.CIRC_IDLE, LEDStates.CIRC_WARPING, LEDStates.CIRC_WARPING,
-                () => SetLEDState(0x02, LEDStates.CIRC_COMPLETE, 0x00));
+                () =>
+                {
+                    SetLEDState(0x02, LEDStates.CIRC_COMPLETE, 0x00);
+                    OnMacroFinished(0x02, true);
+                });
+            return MacroStart.Started;
         }
 
         // ------------------------------------------------------------------
@@ -1361,17 +1490,11 @@ namespace KSPMacropad
         // drops periapsis to DEORBIT_ATMOSPHERE_FRACTION of the atmosphere's
         // depth (or to sea level on an airless body).
         // ------------------------------------------------------------------
-        void DoDeorbitBurn()
+        MacroStart StartDeorbitBurn()
         {
             Vessel vessel = FlightGlobals.ActiveVessel;
-            if (vessel == null || CancelIfOwnJobRunning(0x07))
-                return;
-
-            if (IsFlightComputerBusy())
-            {
-                Debug.Log("[KSPMacropad] DEORBIT: another macro is flying the vessel, ignoring press");
-                return;
-            }
+            if (vessel == null)
+                return MacroStart.Failed;
 
             Orbit orbit = vessel.orbit;
             CelestialBody body = vessel.mainBody;
@@ -1380,7 +1503,7 @@ namespace KSPMacropad
             {
                 Debug.Log("[KSPMacropad] DEORBIT: not in a stable orbit");
                 SetLEDState(0x07, LEDStates.DEORBIT_UNAVAILABLE, 0x00);
-                return;
+                return MacroStart.Failed;
             }
 
             double targetPeR = body.Radius + (body.atmosphere ? body.atmosphereDepth * DEORBIT_ATMOSPHERE_FRACTION : 0.0);
@@ -1388,7 +1511,7 @@ namespace KSPMacropad
             {
                 Debug.Log("[KSPMacropad] DEORBIT: periapsis is already at or below the deorbit target");
                 SetLEDState(0x07, LEDStates.DEORBIT_UNAVAILABLE, 0x00);
-                return;
+                return MacroStart.Failed;
             }
 
             EnsureSAS(vessel);
@@ -1404,7 +1527,7 @@ namespace KSPMacropad
             if (!HasDeltaVFor(vessel, dv.magnitude, "DEORBIT"))
             {
                 SetLEDState(0x07, LEDStates.DEORBIT_UNAVAILABLE, 0x00);
-                return;
+                return MacroStart.Failed;
             }
 
             ManeuverNode node = vessel.patchedConicSolver.AddManeuverNode(burnUT);
@@ -1412,7 +1535,12 @@ namespace KSPMacropad
             SetLEDState(0x07, LEDStates.DEORBIT_PLANNED, 0x00);
 
             StartNodeJob(vessel, node, 0x07, LEDStates.DEORBIT_IDLE, LEDStates.DEORBIT_WARPING, LEDStates.DEORBIT_BURNING,
-                () => SetLEDState(0x07, LEDStates.DEORBIT_IDLE, 0x00));
+                () =>
+                {
+                    SetLEDState(0x07, LEDStates.DEORBIT_IDLE, 0x00);
+                    OnMacroFinished(0x07, true);
+                });
+            return MacroStart.Started;
         }
 
         // Current target's orbit, only if it orbits the same body as the
@@ -1445,40 +1573,40 @@ namespace KSPMacropad
         // ------------------------------------------------------------------
         // INTERCEPT CALC (0x04): first press plans the cheapest intercept
         // burn to the current target and shows it (SOLUTION / INSUFFICIENT_DV);
-        // second press flies it. LED stays SOLUTION during execution (no
-        // executing state is defined for this key), then returns to IDLE.
+        // second press flies it. When it starts from the queue it plans and
+        // flies in one go, since nobody is there to press it twice. LED
+        // stays SOLUTION during execution (no executing state is defined for
+        // this key), then returns to IDLE.
         //
         // Aims at the target's center. For a vessel that's what you want;
         // for a moon it gives an SOI encounter with a low (possibly impact)
         // periapsis that needs a small correction after.
         // ------------------------------------------------------------------
-        void DoInterceptCalc()
+        MacroStart StartInterceptCalc(bool fromQueue)
         {
             Vessel vessel = FlightGlobals.ActiveVessel;
-            if (vessel == null || CancelIfOwnJobRunning(0x04))
-                return;
+            if (vessel == null)
+                return MacroStart.Failed;
 
-            if (IsFlightComputerBusy())
-            {
-                Debug.Log("[KSPMacropad] INTERCEPT: another macro is flying the vessel, ignoring press");
-                return;
-            }
-
-            if (interceptPlannedNode != null && vessel.patchedConicSolver.maneuverNodes.Contains(interceptPlannedNode))
+            bool havePlan = interceptPlannedNode != null && vessel.patchedConicSolver.maneuverNodes.Contains(interceptPlannedNode);
+            if (havePlan && !fromQueue)
             {
                 ManeuverNode planned = interceptPlannedNode;
                 interceptPlannedNode = null;
-                StartNodeJob(vessel, planned, 0x04, LEDStates.INTERCEPT_IDLE, LEDStates.INTERCEPT_SOLUTION, LEDStates.INTERCEPT_SOLUTION,
-                    () => SetLEDState(0x04, LEDStates.INTERCEPT_IDLE, 0x00));
-                return;
+                StartInterceptJob(vessel, planned);
+                return MacroStart.Started;
             }
+
+            // A plan made before the queue got here is stale - replan.
+            if (havePlan)
+                vessel.patchedConicSolver.RemoveManeuverNode(interceptPlannedNode);
             interceptPlannedNode = null;
 
             Orbit targetOrbit = GetTargetOrbitInSameSOI(vessel, "INTERCEPT");
             if (targetOrbit == null)
             {
                 SetLEDState(0x04, LEDStates.INTERCEPT_IDLE, 0x00);
-                return;
+                return MacroStart.Failed;
             }
 
             SetLEDState(0x04, LEDStates.INTERCEPT_CALCULATING, 0x00);
@@ -1490,7 +1618,7 @@ namespace KSPMacropad
             {
                 Debug.Log("[KSPMacropad] INTERCEPT: no intercept found in the search window");
                 SetLEDState(0x04, LEDStates.INTERCEPT_INSUFFICIENT_DV, 0x00);
-                return;
+                return MacroStart.Failed;
             }
 
             Debug.Log("[KSPMacropad] INTERCEPT: burn of " + dv.magnitude + " m/s at UT " + departureUT);
@@ -1498,13 +1626,31 @@ namespace KSPMacropad
             if (!HasDeltaVFor(vessel, dv.magnitude, "INTERCEPT"))
             {
                 SetLEDState(0x04, LEDStates.INTERCEPT_INSUFFICIENT_DV, 0x00);
-                return;
+                return MacroStart.Failed;
             }
 
             ManeuverNode node = vessel.patchedConicSolver.AddManeuverNode(departureUT);
             SetNodeFromOrbitFrameDv(vessel, node, dv);
+
+            if (fromQueue)
+            {
+                StartInterceptJob(vessel, node);
+                return MacroStart.Started;
+            }
+
             interceptPlannedNode = node;
             SetLEDState(0x04, LEDStates.INTERCEPT_SOLUTION, 0x00);
+            return MacroStart.Done;
+        }
+
+        void StartInterceptJob(Vessel vessel, ManeuverNode node)
+        {
+            StartNodeJob(vessel, node, 0x04, LEDStates.INTERCEPT_IDLE, LEDStates.INTERCEPT_SOLUTION, LEDStates.INTERCEPT_SOLUTION,
+                () =>
+                {
+                    SetLEDState(0x04, LEDStates.INTERCEPT_IDLE, 0x00);
+                    OnMacroFinished(0x04, true);
+                });
         }
 
         // Grid search over departure time (up to one synodic period, capped
@@ -1569,23 +1715,17 @@ namespace KSPMacropad
         // the following periapsis that sets semi-major axis = target's.
         // A second press while either burn is pending cancels it.
         // ------------------------------------------------------------------
-        void DoOrbitSync()
+        MacroStart StartOrbitSync()
         {
             Vessel vessel = FlightGlobals.ActiveVessel;
-            if (vessel == null || CancelIfOwnJobRunning(0x05))
-                return;
-
-            if (IsFlightComputerBusy())
-            {
-                Debug.Log("[KSPMacropad] ORBIT SYNC: another macro is flying the vessel, ignoring press");
-                return;
-            }
+            if (vessel == null)
+                return MacroStart.Failed;
 
             Orbit targetOrbit = GetTargetOrbitInSameSOI(vessel, "ORBIT SYNC");
             if (targetOrbit == null)
             {
                 SetLEDState(0x05, LEDStates.ORBSYNC_IDLE, 0x00);
-                return;
+                return MacroStart.Failed;
             }
 
             SetLEDState(0x05, LEDStates.ORBSYNC_CALCULATING, 0x00);
@@ -1595,10 +1735,7 @@ namespace KSPMacropad
             Vector3d targetNormal = OrbitNormalAt(targetOrbit, now);
 
             if (OrbitMath.AngleDeg(OrbitNormalAt(orbit, now), targetNormal) < ORBITSYNC_MIN_REL_INCLINATION_DEG)
-            {
-                StartOrbitSyncPeriodMatch(targetOrbit);
-                return;
-            }
+                return StartOrbitSyncPeriodMatch(targetOrbit);
 
             double searchStart = now + NODE_MIN_LEAD_SECONDS;
             bool found = OrbitMath.FindFirstSignChange(
@@ -1609,28 +1746,34 @@ namespace KSPMacropad
             {
                 Debug.Log("[KSPMacropad] ORBIT SYNC: couldn't find where the orbit crosses the target's plane");
                 SetLEDState(0x05, LEDStates.ORBSYNC_IDLE, 0x00);
-                return;
+                return MacroStart.Failed;
             }
 
             Vector3d dv = OrbitMath.PlaneMatchDv(orbit.getOrbitalVelocityAtUT(crossingUT), targetNormal);
             if (!HasDeltaVFor(vessel, dv.magnitude, "ORBIT SYNC"))
             {
                 SetLEDState(0x05, LEDStates.ORBSYNC_IDLE, 0x00);
-                return;
+                return MacroStart.Failed;
             }
 
             ManeuverNode node = vessel.patchedConicSolver.AddManeuverNode(crossingUT);
             SetNodeFromOrbitFrameDv(vessel, node, dv);
 
             StartNodeJob(vessel, node, 0x05, LEDStates.ORBSYNC_IDLE, LEDStates.ORBSYNC_EXECUTING, LEDStates.ORBSYNC_EXECUTING,
-                () => StartOrbitSyncPeriodMatch(targetOrbit));
+                () =>
+                {
+                    MacroStart periodMatch = StartOrbitSyncPeriodMatch(targetOrbit);
+                    if (periodMatch != MacroStart.Started)
+                        OnMacroFinished(0x05, periodMatch == MacroStart.Done);
+                });
+            return MacroStart.Started;
         }
 
-        void StartOrbitSyncPeriodMatch(Orbit targetOrbit)
+        MacroStart StartOrbitSyncPeriodMatch(Orbit targetOrbit)
         {
             Vessel vessel = FlightGlobals.ActiveVessel;
             if (vessel == null)
-                return;
+                return MacroStart.Failed;
 
             Orbit orbit = vessel.orbit;
             double mu = orbit.referenceBody.gravParameter;
@@ -1649,27 +1792,32 @@ namespace KSPMacropad
             {
                 Debug.Log("[KSPMacropad] ORBIT SYNC: target's orbit is too small to reach from this periapsis");
                 SetLEDState(0x05, LEDStates.ORBSYNC_IDLE, 0x00);
-                return;
+                return MacroStart.Failed;
             }
 
             Vector3d dv = vel.normalized * OrbitMath.VisVivaSpeed(mu, r, aTarget) - vel;
             if (dv.magnitude < AUTOPILOT_DV_EPSILON)
             {
                 SetLEDState(0x05, LEDStates.ORBSYNC_COMPLETE, 0x00);
-                return;
+                return MacroStart.Done;
             }
 
             if (!HasDeltaVFor(vessel, dv.magnitude, "ORBIT SYNC"))
             {
                 SetLEDState(0x05, LEDStates.ORBSYNC_IDLE, 0x00);
-                return;
+                return MacroStart.Failed;
             }
 
             ManeuverNode node = vessel.patchedConicSolver.AddManeuverNode(burnUT);
             SetNodeFromOrbitFrameDv(vessel, node, dv);
 
             StartNodeJob(vessel, node, 0x05, LEDStates.ORBSYNC_IDLE, LEDStates.ORBSYNC_EXECUTING, LEDStates.ORBSYNC_EXECUTING,
-                () => SetLEDState(0x05, LEDStates.ORBSYNC_COMPLETE, 0x00));
+                () =>
+                {
+                    SetLEDState(0x05, LEDStates.ORBSYNC_COMPLETE, 0x00);
+                    OnMacroFinished(0x05, true);
+                });
+            return MacroStart.Started;
         }
 
         // ------------------------------------------------------------------
@@ -1737,44 +1885,33 @@ namespace KSPMacropad
         }
 
         // ------------------------------------------------------------------
-        // AUTO GRAVITY TURN (0x01): toggle. Pitches from AGT_START_PITCH_DEG
+        // AUTO GRAVITY TURN (0x01): pitches from AGT_START_PITCH_DEG
         // at AGT_START_ALTITUDE down to AGT_END_PITCH_DEG at AGT_END_ALTITUDE
         // (linear in altitude), heading due east. While dynamic pressure is
         // above AGT_MAX_Q_KPA the commanded direction is held within
         // AGT_MAX_AOA_DEG of surface prograde to keep aero loads down. Cuts
         // throttle and ends once apoapsis reaches AGT_TARGET_APOAPSIS,
-        // leaving the circularization to CIRCULARIZE. Doesn't touch the
-        // throttle otherwise.
+        // leaving the circularization to CIRCULARIZE (queue it to have that
+        // happen automatically). Doesn't touch the throttle otherwise.
         // ------------------------------------------------------------------
-        void DoAutoGravityTurn()
+        MacroStart StartAutoGravityTurn()
         {
             Vessel vessel = FlightGlobals.ActiveVessel;
             if (vessel == null)
-                return;
-
-            if (agtActive)
-            {
-                StopGravityTurn(vessel, "cancelled by keypress");
-                return;
-            }
-
-            if (IsFlightComputerBusy())
-            {
-                Debug.Log("[KSPMacropad] AUTO GRAVITY TURN: another macro is flying the vessel, ignoring press");
-                return;
-            }
+                return MacroStart.Failed;
 
             Vessel.Situations s = vessel.situation;
             if (s != Vessel.Situations.PRELAUNCH && s != Vessel.Situations.FLYING && s != Vessel.Situations.SUB_ORBITAL)
             {
                 Debug.Log("[KSPMacropad] AUTO GRAVITY TURN: only runs during ascent");
-                return;
+                return MacroStart.Failed;
             }
 
             EnsureSAS(vessel);
             vessel.Autopilot.SetMode(VesselAutopilot.AutopilotMode.StabilityAssist);
             agtActive = true;
             SetLEDState(0x01, LEDStates.AGT_ACTIVE, 0x00);
+            return MacroStart.Started;
         }
 
         void TickGravityTurn()
@@ -1786,17 +1923,22 @@ namespace KSPMacropad
             if (vessel == null)
                 return;
 
-            if (vessel.situation == Vessel.Situations.ORBITING || vessel.situation == Vessel.Situations.ESCAPING ||
-                vessel.situation == Vessel.Situations.LANDED || vessel.situation == Vessel.Situations.SPLASHED)
+            if (vessel.situation == Vessel.Situations.LANDED || vessel.situation == Vessel.Situations.SPLASHED)
             {
-                StopGravityTurn(vessel, "left ascent (situation " + vessel.situation + ")");
+                StopGravityTurn(vessel, "vessel is back on the ground", false);
+                return;
+            }
+
+            if (vessel.situation == Vessel.Situations.ORBITING || vessel.situation == Vessel.Situations.ESCAPING)
+            {
+                StopGravityTurn(vessel, "reached orbit", true);
                 return;
             }
 
             if (vessel.orbit.ApA >= AGT_TARGET_APOAPSIS)
             {
                 FlightInputHandler.state.mainThrottle = 0f;
-                StopGravityTurn(vessel, "target apoapsis reached - press CIRCULARIZE next");
+                StopGravityTurn(vessel, "target apoapsis reached", true);
                 return;
             }
 
@@ -1827,13 +1969,14 @@ namespace KSPMacropad
             vessel.Autopilot.SAS.LockRotation(rotation);
         }
 
-        void StopGravityTurn(Vessel vessel, string reason)
+        void StopGravityTurn(Vessel vessel, string reason, bool success)
         {
             Debug.Log("[KSPMacropad] AUTO GRAVITY TURN: stopped - " + reason);
             agtActive = false;
             if (vessel != null)
                 vessel.Autopilot.SetMode(VesselAutopilot.AutopilotMode.StabilityAssist);
             SetLEDState(0x01, LEDStates.AGT_IDLE, 0x00);
+            OnMacroFinished(0x01, success);
         }
 
         // VesselDeltaV.TotalDeltaVActual: "The Total Simulated DeltaV
