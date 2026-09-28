@@ -129,6 +129,25 @@ namespace KSPMacropad
         private const double RENDEZVOUS_IN_RANGE_METERS = 200.0;  // placeholder
         private const double RENDEZVOUS_MAX_CLOSING_MS = 50.0;    // closing speed that maps to data byte 255
 
+        // Encoder state. encoderMode and the dial targets mirror the
+        // firmware's own copies (same toggles, same clamping), so a value
+        // committed here is the value the pad's OLED was showing.
+        private int encoderMode = 1;
+        private int precisionThrottleTarget = 0;   // mode 2 left, 0-100 %
+        private int precisionHeadingTarget = 0;    // mode 2 right, 0-359 deg
+        private int rcsLimiterTarget = 0;          // mode 3 right, 0-100 %
+        private bool precisionThrottleDialed = false;
+        private bool precisionHeadingDialed = false;
+        private bool rcsLimiterDialed = false;
+
+        private bool headingHoldActive = false;
+        private double headingHoldPitchDeg;
+        private double headingHoldHeadingDeg;
+
+        private const float THROTTLE_STEP_PER_DETENT = 0.02f;  // mode 1 left: 2% per click
+        private const double ZOOM_FACTOR_PER_DETENT = 1.1;     // mode 3 left: 10% closer/farther per click
+        private const float MANUAL_INPUT_THRESHOLD = 0.1f;     // pitch/yaw/roll input that releases a heading hold
+
         private bool agtActive = false;
         private const double AGT_START_ALTITUDE = 10000.0;
         private const double AGT_END_ALTITUDE = 45000.0;
@@ -229,7 +248,7 @@ namespace KSPMacropad
 
                             case 0x0B:
                                 Debug.Log("[KSPMacropad] KEY PRESSED: PRECISION INPUT TOGGLE");
-                                //switch encoder mode to precision
+                                OnPrecisionInputKey();
                                 break;
 
                             case 0x0C:
@@ -244,7 +263,7 @@ namespace KSPMacropad
 
                             case 0x0E:
                                 Debug.Log("[KSPMacropad] KEY PRESSED: AUXILARY MODE TOGGLE");
-                                //switch encoder mode to auxilary
+                                OnAuxModeKey();
                                 break;
 
                             case 0x0F:
@@ -256,40 +275,13 @@ namespace KSPMacropad
                         break;
 
                     case 0x02:
-                        Debug.Log("[KSPMacropad] Trigger type: Encoder");
-                        short steps;
-                        switch(msg[2])
-                        {
-                            case 0x11:
-                                Debug.Log("[KSPMacropad] TURNED ENCODER(mode 1): ENCDR_LEFT_MD1");
-                                steps = (short)((msg[3] << 8) | msg[4]);
-                                break;
-
-                            case 0x12:
-                                Debug.Log("[KSPMacropad] TURNED ENCODER(mode 1): ENCDR_RIGHT_MD1");
-                                steps = (short)((msg[3] << 8) | msg[4]);
-                                break;
-
-                            case 0x21:
-                                Debug.Log("[KSPMacropad] TURNED ENCODER(mode 2): ENCDR_LEFT_MD2");
-                                steps = (short)((msg[3] << 8) | msg[4]);
-                                break;
-
-                            case 0x22:
-                                Debug.Log("[KSPMacropad] TURNED ENCODER(mode 2): ENCDR_RIGHT_MD2");
-                                steps = (short)((msg[3] << 8) | msg[4]);
-                                break;
-
-                            case 0x31:
-                                Debug.Log("[KSPMacropad] TURNED ENCODER(mode 3): ENCDR_LEFT_MD3");
-                                steps = (short)((msg[3] << 8) | msg[4]);
-                                break;
-
-                            case 0x32:
-                                Debug.Log("[KSPMacropad] TURNED ENCODER(mode 3): ENCDR_RIGHT_MD3");
-                                steps = (short)((msg[3] << 8) | msg[4]);
-                                break;
-                        }
+                        // id = (mode << 4) | encoder, encoder 1 = left, 2 = right
+                        int encoderModeNibble = msg[2] >> 4;
+                        int encoderSide = msg[2] & 0x0F;
+                        short steps = (short)((msg[3] << 8) | msg[4]);
+                        Debug.Log("[KSPMacropad] TURNED ENCODER(mode " + encoderModeNibble + "): " +
+                            (encoderSide == 1 ? "LEFT" : "RIGHT") + " " + steps);
+                        HandleEncoder(encoderModeNibble, encoderSide, steps);
                         break;
                 }
 
@@ -303,6 +295,7 @@ namespace KSPMacropad
             TickNodeJob();
             TickGravityTurn();
             TickRendezvous();
+            TickHeadingHold();
         }
 
         // Sent on a fixed interval regardless of state change (the one
@@ -1978,16 +1971,9 @@ namespace KSPMacropad
 
             double pitchDeg = OrbitMath.GravityTurnPitch(vessel.altitude, AGT_START_ALTITUDE, AGT_END_ALTITUDE,
                 AGT_START_PITCH_DEG, AGT_END_PITCH_DEG);
-            double pitch = pitchDeg * Math.PI / 180.0;
 
-            // World-space local frame. Cross(up, north) is east in Unity's
-            // axes (x right when y is up and z is forward).
-            Vector3d up = (vessel.CoMD - vessel.mainBody.position).normalized;
-            Vector3d axis = ToVector3d(vessel.mainBody.transform.up);
-            Vector3d north = (axis - up * Vector3d.Dot(axis, up)).normalized;
-            Vector3d east = Vector3d.Cross(up, north);
-
-            Vector3d direction = up * Math.Sin(pitch) + east * Math.Cos(pitch);
+            LocalFrame(vessel, out Vector3d up, out Vector3d north, out Vector3d east);
+            OrbitMath.HeadingPitchDirection(up, north, east, pitchDeg, 90.0, out Vector3d direction, out Vector3d rollReference);
 
             Vector3d srfVelocity = ToVector3d(vessel.GetSrfVelocity());
             if (vessel.rootPart != null && vessel.rootPart.dynamicPressurekPa > AGT_MAX_Q_KPA &&
@@ -1996,11 +1982,26 @@ namespace KSPMacropad
                 direction = OrbitMath.LimitAngle(srfVelocity, direction, AGT_MAX_AOA_DEG);
             }
 
-            // The vessel's nose is ReferenceTransform.up, not forward, so
-            // LookRotation (which aims forward) is followed by a 90 degree
-            // pitch that maps local up onto the aimed direction.
-            Quaternion rotation = Quaternion.LookRotation((Vector3)direction, (Vector3)north) * Quaternion.Euler(90f, 0f, 0f);
-            vessel.Autopilot.SAS.LockRotation(rotation);
+            vessel.Autopilot.SAS.LockRotation(NoseRotation(direction, rollReference));
+        }
+
+        // World-space up/north/east at the vessel. Cross(up, north) is east
+        // in Unity's axes (x right when y is up and z is forward).
+        static void LocalFrame(Vessel vessel, out Vector3d up, out Vector3d north, out Vector3d east)
+        {
+            up = (vessel.CoMD - vessel.mainBody.position).normalized;
+            Vector3d axis = ToVector3d(vessel.mainBody.transform.up);
+            north = (axis - up * Vector3d.Dot(axis, up)).normalized;
+            east = Vector3d.Cross(up, north);
+        }
+
+        // SAS rotation that points the vessel's nose along `direction`. The
+        // nose is ReferenceTransform.up, not forward, so LookRotation (which
+        // aims forward) is followed by a 90 degree pitch that maps local up
+        // onto the aimed direction. rollReference fixes the roll.
+        static Quaternion NoseRotation(Vector3d direction, Vector3d rollReference)
+        {
+            return Quaternion.LookRotation((Vector3)direction, (Vector3)rollReference) * Quaternion.Euler(90f, 0f, 0f);
         }
 
         void StopGravityTurn(Vessel vessel, string reason, bool success)
@@ -2011,6 +2012,221 @@ namespace KSPMacropad
                 vessel.Autopilot.SetMode(VesselAutopilot.AutopilotMode.StabilityAssist);
             SetLEDState(0x01, LEDStates.AGT_IDLE, 0x00);
             OnMacroFinished(0x01, success);
+        }
+
+        // ------------------------------------------------------------------
+        // Encoders. Mode 1 is live control; modes 2 and 3 dial values that
+        // are applied when their key is pressed again (the firmware drops
+        // back to mode 1 at the same moment). Pushing the encoder shafts
+        // isn't wired on this board (no free pins), so there's no click
+        // handling here.
+        // ------------------------------------------------------------------
+        void HandleEncoder(int mode, int side, int steps)
+        {
+            if (mode != encoderMode)
+            {
+                Debug.Log("[KSPMacropad] Encoder mode resynced to " + mode + " from the pad (was " + encoderMode + ")");
+                encoderMode = mode;
+            }
+
+            switch (mode)
+            {
+                case 1:
+                    if (side == 1) AdjustThrottle(steps);
+                    else AdjustWarp(steps);
+                    break;
+
+                case 2:
+                    if (side == 1)
+                    {
+                        precisionThrottleTarget = Math.Max(0, Math.Min(100, precisionThrottleTarget + steps));
+                        precisionThrottleDialed = true;
+                    }
+                    else
+                    {
+                        precisionHeadingTarget = OrbitMath.WrapDegrees(precisionHeadingTarget + steps);
+                        precisionHeadingDialed = true;
+                    }
+                    break;
+
+                case 3:
+                    if (side == 1)
+                    {
+                        AdjustZoom(steps);
+                    }
+                    else
+                    {
+                        rcsLimiterTarget = Math.Max(0, Math.Min(100, rcsLimiterTarget + steps));
+                        rcsLimiterDialed = true;
+                    }
+                    break;
+            }
+        }
+
+        // Same toggles as the firmware: pressing a mode's key while in that
+        // mode commits it and returns to mode 1; pressing it from any other
+        // mode switches straight to it (an uncommitted mode is dropped).
+        void OnPrecisionInputKey()
+        {
+            if (encoderMode == 2)
+            {
+                CommitPrecisionInput();
+                encoderMode = 1;
+                return;
+            }
+
+            encoderMode = 2;
+            precisionThrottleDialed = false;
+            precisionHeadingDialed = false;
+        }
+
+        void OnAuxModeKey()
+        {
+            if (encoderMode == 3)
+            {
+                CommitAuxMode();
+                encoderMode = 1;
+                return;
+            }
+
+            encoderMode = 3;
+            rcsLimiterDialed = false;
+        }
+
+        void AdjustThrottle(int steps)
+        {
+            float throttle = FlightInputHandler.state.mainThrottle + steps * THROTTLE_STEP_PER_DETENT;
+            FlightInputHandler.state.mainThrottle = Math.Max(0f, Math.Min(1f, throttle));
+        }
+
+        // On-rails warp is capped by KSP's own altitude limit for the
+        // current body; physics warp by its rate table.
+        void AdjustWarp(int steps)
+        {
+            Vessel vessel = FlightGlobals.ActiveVessel;
+            TimeWarp warp = TimeWarp.fetch;
+            if (vessel == null || warp == null)
+                return;
+
+            int maxIndex;
+            if (TimeWarp.WarpMode == TimeWarp.Modes.HIGH)
+                maxIndex = Math.Min(warp.warpRates.Length - 1, warp.GetMaxRateForAltitude(vessel.altitude, vessel.mainBody));
+            else
+                maxIndex = warp.physicsWarpRates.Length - 1;
+
+            int target = Math.Max(0, Math.Min(maxIndex, TimeWarp.CurrentRateIndex + steps));
+            if (target != TimeWarp.CurrentRateIndex)
+                TimeWarp.SetRate(target, false);
+        }
+
+        // Clockwise (positive steps) zooms in.
+        void AdjustZoom(int steps)
+        {
+            FlightCamera camera = FlightCamera.fetch;
+            if (camera == null)
+                return;
+
+            double distance = camera.Distance * Math.Pow(ZOOM_FACTOR_PER_DETENT, -steps);
+            distance = Math.Max(camera.minDistance, Math.Min(camera.maxDistance, distance));
+            camera.SetDistance((float)distance);
+        }
+
+        void CommitPrecisionInput()
+        {
+            Vessel vessel = FlightGlobals.ActiveVessel;
+            if (vessel == null)
+                return;
+
+            if (precisionThrottleDialed)
+            {
+                FlightInputHandler.state.mainThrottle = precisionThrottleTarget / 100f;
+                Debug.Log("[KSPMacropad] PRECISION: throttle set to " + precisionThrottleTarget + "%");
+            }
+
+            if (!precisionHeadingDialed)
+                return;
+
+            if (IsFlightComputerBusy())
+            {
+                Debug.Log("[KSPMacropad] PRECISION: " + MacroName(activeMacroKey) + " is steering, heading not applied");
+                return;
+            }
+
+            Vessel.Situations s = vessel.situation;
+            if (s == Vessel.Situations.PRELAUNCH || s == Vessel.Situations.LANDED || s == Vessel.Situations.SPLASHED)
+            {
+                Debug.Log("[KSPMacropad] PRECISION: heading hold only works in flight");
+                return;
+            }
+
+            if (!vessel.Autopilot.CanSetMode(VesselAutopilot.AutopilotMode.StabilityAssist))
+            {
+                Debug.Log("[KSPMacropad] PRECISION: vessel has no SAS, heading not applied");
+                return;
+            }
+
+            // Hold the current pitch; only the heading changes.
+            LocalFrame(vessel, out Vector3d up, out Vector3d north, out Vector3d east);
+            Vector3d nose = ToVector3d(vessel.ReferenceTransform.up);
+            headingHoldPitchDeg = 90.0 - OrbitMath.AngleDeg(up, nose);
+            headingHoldHeadingDeg = precisionHeadingTarget;
+            headingHoldActive = true;
+
+            EnsureSAS(vessel);
+            vessel.Autopilot.SetMode(VesselAutopilot.AutopilotMode.StabilityAssist);
+            Debug.Log("[KSPMacropad] PRECISION: holding heading " + precisionHeadingTarget + " at pitch " +
+                headingHoldPitchDeg.ToString("F1"));
+        }
+
+        // Re-locks SAS onto the held heading every frame (the local frame
+        // turns as the vessel moves around the body). Releases on manual
+        // pitch/yaw/roll input, when a flying macro takes over, or on landing.
+        void TickHeadingHold()
+        {
+            if (!headingHoldActive)
+                return;
+
+            Vessel vessel = FlightGlobals.ActiveVessel;
+            if (vessel == null)
+                return;
+
+            FlightCtrlState input = FlightInputHandler.state;
+            string releaseReason = null;
+            if (Math.Abs(input.pitch) > MANUAL_INPUT_THRESHOLD || Math.Abs(input.yaw) > MANUAL_INPUT_THRESHOLD ||
+                Math.Abs(input.roll) > MANUAL_INPUT_THRESHOLD)
+                releaseReason = "manual input";
+            else if (IsFlightComputerBusy())
+                releaseReason = MacroName(activeMacroKey) + " took over";
+            else if (vessel.situation == Vessel.Situations.LANDED || vessel.situation == Vessel.Situations.SPLASHED)
+                releaseReason = "landed";
+
+            if (releaseReason != null)
+            {
+                headingHoldActive = false;
+                Debug.Log("[KSPMacropad] PRECISION: heading hold released - " + releaseReason);
+                return;
+            }
+
+            LocalFrame(vessel, out Vector3d up, out Vector3d north, out Vector3d east);
+            OrbitMath.HeadingPitchDirection(up, north, east, headingHoldPitchDeg, headingHoldHeadingDeg,
+                out Vector3d direction, out Vector3d rollReference);
+            vessel.Autopilot.SAS.LockRotation(NoseRotation(direction, rollReference));
+        }
+
+        void CommitAuxMode()
+        {
+            if (!rcsLimiterDialed)
+                return;
+
+            Vessel vessel = FlightGlobals.ActiveVessel;
+            if (vessel == null)
+                return;
+
+            List<ModuleRCS> thrusters = vessel.FindPartModulesImplementing<ModuleRCS>();
+            foreach (ModuleRCS rcs in thrusters)
+                rcs.thrustPercentage = rcsLimiterTarget;
+
+            Debug.Log("[KSPMacropad] AUX: RCS thrust limiter set to " + rcsLimiterTarget + "% on " + thrusters.Count + " thruster(s)");
         }
 
         // VesselDeltaV.TotalDeltaVActual: "The Total Simulated DeltaV
@@ -2114,6 +2330,26 @@ namespace KSPMacropad
 
             double m = maxDeg * Math.PI / 180.0;
             return f * Math.Cos(m) + perp.normalized * Math.Sin(m);
+        }
+
+        // Wraps any integer degree value into 0-359 (C#'s % keeps the sign).
+        public static int WrapDegrees(int degrees)
+        {
+            return ((degrees % 360) + 360) % 360;
+        }
+
+        // Unit direction at the given pitch above the horizon and compass
+        // heading (0 = north, 90 = east), plus a horizontal vector
+        // perpendicular to it to fix the roll. up/north/east must be an
+        // orthonormal local frame.
+        public static void HeadingPitchDirection(Vector3d up, Vector3d north, Vector3d east, double pitchDeg,
+            double headingDeg, out Vector3d direction, out Vector3d rollReference)
+        {
+            double p = pitchDeg * Math.PI / 180.0;
+            double h = headingDeg * Math.PI / 180.0;
+            Vector3d horizontal = north * Math.Cos(h) + east * Math.Sin(h);
+            direction = up * Math.Sin(p) + horizontal * Math.Cos(p);
+            rollReference = north * Math.Sin(h) - east * Math.Cos(h);
         }
 
         public static double GravityTurnPitch(double altitude, double startAltitude, double endAltitude,
