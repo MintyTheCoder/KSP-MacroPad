@@ -90,6 +90,7 @@ MACRO_TAGS = {
     0x04: "INTC",
     0x05: "SYNC",
     0x07: "DORB",
+    0x0A: "SBRN",
     0x0F: "AUTO",
 }
 
