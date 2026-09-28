@@ -1,6 +1,6 @@
 # ============================================================================
 # KSP MacroPad — Firmware (CircuitPython)
-# Version: 0.2.1
+# Version: 0.3.0
 # ============================================================================
 
 import time
@@ -46,13 +46,52 @@ SUICIDE_ARM_HOLD_TICKS = int(SUICIDE_ARM_HOLD_SECONDS / LOOP_INTERVAL)
 
 OLED_WIDTH = 128
 OLED_HEIGHT = 32
-BOOT_SPLASH_SECONDS = 1.2
+OLED_TEXT_COLUMNS = OLED_WIDTH // 6   # terminalio.FONT is 6px wide -> 21 columns
+
+# Boot animation: T-3/2/1 countdown, then a rocket climbing off the top of
+# the screen, then the title. LEDs fill along the chain during each part.
+BOOT_COUNTDOWN_STEP_SECONDS = 0.35
+BOOT_LAUNCH_FRAME_SECONDS = 0.04
+BOOT_LAUNCH_PIXELS_PER_FRAME = 2
+BOOT_TITLE_SECONDS = 0.8
+BOOT_COUNTDOWN_COLOR = (255, 120, 0)
+BOOT_LAUNCH_COLOR = (0, 100, 255)
+
+# '#' = rocket body, '*' = exhaust (flickers every frame), '.' = empty
+ROCKET_ART = (
+    "...##...",
+    "..####..",
+    "..#..#..",
+    "..####..",
+    "..####..",
+    "..####..",
+    ".######.",
+    "##.##.##",
+    "#..##..#",
+    "...**...",
+    "..*..*..",
+    "...**...",
+)
 
 # Reserved inbound IDs outside the key (0x00-0x0F) / underglow (0x10-0x13)
 # ranges — same 5-byte packet frame, just new meanings for id/state/data.
 HEARTBEAT_ID = 0x14           # mod->pad, sent periodically regardless of state change
 THROTTLE_TELEMETRY_ID = 0x15  # data = live throttle % (0-100)
 WARP_TELEMETRY_ID = 0x16      # data = live warp index (mod-defined 0-255 lookup)
+ACTIVE_MACRO_ID = 0x17        # data = key id of the macro flying the vessel, NO_MACRO if none
+NEXT_MACRO_ID = 0x18          # data = key id at the head of the mod's queue, NO_MACRO if empty
+QUEUE_LENGTH_ID = 0x19        # data = number of queued macros (not counting the active one)
+NO_MACRO = 0xFF
+
+# 4-char OLED tags for the macros that can be active/queued.
+MACRO_TAGS = {
+    0x01: "AGT",
+    0x02: "CIRC",
+    0x04: "INTC",
+    0x05: "SYNC",
+    0x07: "DORB",
+    0x0F: "AUTO",
+}
 
 HEARTBEAT_TIMEOUT = 3.0   # seconds since last heartbeat before we call it disconnected
 
@@ -92,6 +131,12 @@ dial_targets = {
 # below) — None until the first packet of that type arrives.
 live_throttle = None
 live_warp = None
+
+# Macro queue as reported by the mod (see ACTIVE_MACRO_ID etc.). Cleared
+# on disconnect since the mod can't be flying anything we can see.
+active_macro = None
+next_macro = None
+queued_count = 0
 
 _last_heartbeat = None      # time.monotonic() of the last heartbeat, None = never seen one
 _last_connected = False     # last displayed connection state, so update_display only fires on change
@@ -390,11 +435,67 @@ def apply_led_update(led_id, state, data):
 # TELEMETRY_ID) once received; modes 2/3 show the locally-dialed target
 # values (pre-commit, not yet sent to the mod as a "final" value).
 
-def show_boot_splash():
-    splash = displayio.Group()
-    splash.append(label.Label(terminalio.FONT, text="KSP MACROPAD", x=8, y=16))
-    display.root_group = splash
-    time.sleep(BOOT_SPLASH_SECONDS)
+def _fill_led_chain(fraction, color):
+    """Light the first `fraction` of the chain (in chain order) with color."""
+    lit = int(NUM_LEDS * fraction)
+    for i in range(NUM_LEDS):
+        pixels[i] = color if i < lit else (0, 0, 0)
+    pixels.show()
+
+
+def _make_rocket():
+    """Build the rocket TileGrid from ROCKET_ART. Returns (tilegrid, palette);
+    palette[2] is the exhaust color, toggled per frame for flicker."""
+    height = len(ROCKET_ART)
+    width = len(ROCKET_ART[0])
+    bitmap = displayio.Bitmap(width, height, 3)
+    palette = displayio.Palette(3)
+    palette[0] = 0x000000
+    palette[1] = 0xFFFFFF
+    palette[2] = 0xFFFFFF
+    palette.make_transparent(0)
+    for y, row in enumerate(ROCKET_ART):
+        for x, ch in enumerate(row):
+            if ch == "#":
+                bitmap[x, y] = 1
+            elif ch == "*":
+                bitmap[x, y] = 2
+    return displayio.TileGrid(bitmap, pixel_shader=palette), palette
+
+
+def show_boot_animation():
+    group = displayio.Group()
+    display.root_group = group
+
+    # T-3, T-2, T-1 at 2x scale (12px per char), LEDs filling amber.
+    countdown = label.Label(terminalio.FONT, text="", scale=2, x=(OLED_WIDTH - 3 * 12) // 2, y=16)
+    group.append(countdown)
+    for i, n in enumerate((3, 2, 1)):
+        countdown.text = "T-{}".format(n)
+        _fill_led_chain((i + 1) / 3, BOOT_COUNTDOWN_COLOR)
+        time.sleep(BOOT_COUNTDOWN_STEP_SECONDS)
+    group.remove(countdown)
+
+    # Liftoff: rocket climbs from below the screen until it's off the top,
+    # LEDs refilling blue along the chain as it goes.
+    rocket, palette = _make_rocket()
+    rocket.x = (OLED_WIDTH - len(ROCKET_ART[0])) // 2
+    group.append(rocket)
+    positions = list(range(OLED_HEIGHT, -len(ROCKET_ART) - 1, -BOOT_LAUNCH_PIXELS_PER_FRAME))
+    for frame, y in enumerate(positions):
+        rocket.y = y
+        palette[2] = 0xFFFFFF if frame % 2 == 0 else 0x000000
+        _fill_led_chain((frame + 1) / len(positions), BOOT_LAUNCH_COLOR)
+        time.sleep(BOOT_LAUNCH_FRAME_SECONDS)
+    group.remove(rocket)
+
+    title_text = "KSP MACROPAD"
+    group.append(label.Label(terminalio.FONT, text=title_text, x=(OLED_WIDTH - len(title_text) * 6) // 2, y=16))
+    time.sleep(BOOT_TITLE_SECONDS)
+
+    # Hand the LEDs back blank; the mod sets real states once connected.
+    pixels.fill((0, 0, 0))
+    pixels.show()
 
 
 line1 = label.Label(terminalio.FONT, text="", x=0, y=8)
@@ -405,13 +506,31 @@ main_group.append(line1)
 main_group.append(line2)
 
 
+def format_macro_tag(active, nxt, count):
+    """Right side of line 1: "" when idle, "CIRC" when one macro is flying,
+    "CIRC>SYNC" with one queued, "CIRC>SYNC+2" with three queued. Worst
+    case ("AUTO>DORB+9") is 11 chars, which fits beside "CONN M1"; it's
+    only shown while connected, so it never has to fit beside "NO CONN"."""
+    if active is None:
+        return ""
+    tag = MACRO_TAGS.get(active, "????")
+    if nxt is not None:
+        tag += ">" + MACRO_TAGS.get(nxt, "????")
+        if count > 1:
+            tag += "+{}".format(count - 1)
+    return tag
+
+
 def update_display():
     """Refresh both OLED lines from current mode/dial/telemetry/connection
     state. Call only on a state change (mode toggle, nonzero encoder step,
     telemetry packet, or a connection-status flip) — not every loop tick,
     since each text assignment triggers a redraw."""
     conn_text = "CONN" if _last_connected else "NO CONN"
-    line1.text = "{} MODE {}".format(conn_text, encoder_mode)
+    left = "{} M{}".format(conn_text, encoder_mode)
+    tag = format_macro_tag(active_macro, next_macro, queued_count) if _last_connected else ""
+    padding = max(1, OLED_TEXT_COLUMNS - len(left) - len(tag)) if tag else 0
+    line1.text = left + " " * padding + tag
 
     if encoder_mode == 1:
         if live_throttle is None or live_warp is None:
@@ -430,7 +549,7 @@ def update_display():
 # Main loop
 # ----------------------------------------------------------------------------
 
-show_boot_splash()
+show_boot_animation()
 display.root_group = main_group
 update_display()
 
@@ -482,6 +601,15 @@ while True:
             live_warp = data
             if encoder_mode == 1:
                 update_display()
+        elif packet_id == ACTIVE_MACRO_ID:
+            active_macro = None if data == NO_MACRO else data
+            update_display()
+        elif packet_id == NEXT_MACRO_ID:
+            next_macro = None if data == NO_MACRO else data
+            update_display()
+        elif packet_id == QUEUE_LENGTH_ID:
+            queued_count = data
+            update_display()
         else:
             apply_led_update(packet_id, state, data)
 
@@ -490,6 +618,10 @@ while True:
     connected = _last_heartbeat is not None and (time.monotonic() - _last_heartbeat) < HEARTBEAT_TIMEOUT
     if connected != _last_connected:
         _last_connected = connected
+        if not connected:
+            active_macro = None
+            next_macro = None
+            queued_count = 0
         update_display()
 
     time.sleep(LOOP_INTERVAL)
