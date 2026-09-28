@@ -681,15 +681,23 @@ namespace KSPMacropad
         //     AUTOPILOT_DV_EPSILON), so a high-TWR craft can overshoot.
         //   - no Principia (n-body) detection - doc already flags AUTOPILOT
         //     as broken under Principia; not checked for here.
-        //   - BIGGEST UNVERIFIED RISK: FindBestTransferWindow mixes
-        //     Orbit.getRelativePositionAtUT and Orbit.getOrbitalVelocityAtUT
-        //     results in the same vector math. KSP modders have hit real
-        //     coordinate-frame mismatches between position- and velocity-
-        //     returning Orbit methods before (a Y/Z convention difference).
-        //     That has NOT been checked against a real KSP install here -
-        //     if the frames don't actually match, the computed vInf vectors
-        //     (and therefore the whole search) are wrong, not just
-        //     imprecise. Verify this first once KSP is available.
+        //   - Coordinate frame for FindBestTransferWindow's vector math:
+        //     checked against the KSP API docs. getRelativePositionAtUT is
+        //     documented as "all Vector3d's returned by Orbit class
+        //     functions have their y and z axes flipped" - i.e. every Orbit
+        //     method (including getOrbitalVelocityAtUT) is documented to
+        //     share that same flipped convention, so subtracting two
+        //     velocity vectors both read from Orbit methods (as this code
+        //     does) should stay internally consistent. That note wasn't
+        //     found written specifically against getOrbitalVelocityAtUT
+        //     itself, only stated generally for the class, so treat this as
+        //     "likely fine, not independently confirmed" rather than fully
+        //     settled - recheck once this can actually run against KSP.
+        //   - mid-course correction's burn direction is a known-unsolved
+        //     sign question, not just unverified - see the comment on
+        //     BuildMidCourseCorrectionNode.
+        //   - GetVesselDeltaV's exact stock field name (TotalDeltaVActual)
+        //     could NOT be confirmed - see that method's comment.
         void DoAutopilot()
         {
             Vessel vessel = FlightGlobals.ActiveVessel;
@@ -769,8 +777,8 @@ namespace KSPMacropad
             // FindBestTransferWindow), sized to the solved ejection dv,
             // pointed prograde (see the pointing-error caveat above).
             ManeuverNode node = vessel.patchedConicSolver.AddManeuverNode(departureUT);
-            node.DeltaV = new Vector3d(0, 0, ejectionDv); // (radial, normal, prograde) - UNVERIFIED field name
-            vessel.patchedConicSolver.UpdateFlightPlan(); // UNVERIFIED call
+            node.DeltaV = new Vector3d(0, 0, ejectionDv); // confirmed real field: (radial-plus, normal-minus, prograde)
+            vessel.patchedConicSolver.UpdateFlightPlan(); // confirmed real method, no documented params
 
             autopilotDestination = destinationBody;
             autopilotTransferTime = arrivalUT - departureUT;
@@ -855,15 +863,15 @@ namespace KSPMacropad
                     if (vessel.mainBody == autopilotDestination)
                     {
                         Debug.Log("[KSPMacropad] AUTOPILOT: entered destination SOI, planning capture burn");
-                        double periapsisUT = vessel.orbit.NextPeriapsisTime(currentUT); // UNVERIFIED
+                        double periapsisUT = currentUT + vessel.orbit.timeToPe; // confirmed real property - see FindBestTransferWindow's header comment
                         double rCapture = autopilotDestination.Radius + 100000.0;
                         double vCircCapture = Math.Sqrt(autopilotDestination.gravParameter / rCapture);
-                        double vAtPeriapsis = vessel.orbit.getOrbitalSpeedAtUT(periapsisUT); // UNVERIFIED Orbit API
+                        double vAtPeriapsis = vessel.orbit.getOrbitalVelocityAtUT(periapsisUT).magnitude; // confirmed real method (getOrbitalSpeedAtUT does NOT exist - caught by checking against KSP API docs)
                         double captureBurnDv = vCircCapture - vAtPeriapsis; // negative = retrograde burn
 
                         ManeuverNode captureNode = vessel.patchedConicSolver.AddManeuverNode(periapsisUT);
-                        captureNode.DeltaV = new Vector3d(0, 0, captureBurnDv);
-                        vessel.patchedConicSolver.UpdateFlightPlan(); // UNVERIFIED
+                        captureNode.DeltaV = new Vector3d(0, 0, captureBurnDv); // confirmed real field/convention
+                        vessel.patchedConicSolver.UpdateFlightPlan(); // confirmed real method
 
                         autopilotActiveNode = captureNode;
                         autopilotPhase = AutopilotPhase.WaitCaptureBurn;
@@ -920,6 +928,16 @@ namespace KSPMacropad
         // destination (see the big caveat on DoAutopilot). Returns null if
         // the mismatch is negligible, so the caller can skip straight to
         // waiting for the destination SOI.
+        //
+        // KNOWN GAP: the sign of normalDv below is a guess. Confirmed
+        // against the KSP API docs: ManeuverNode.DeltaV's Y-component is
+        // "delta-V in the normal-MINUS direction" (not plain normal), and
+        // separately, this code never determines whether the vessel is
+        // approaching its ascending or descending node relative to the
+        // destination's orbital plane - that's what actually decides which
+        // sign kills the mismatch instead of doubling it. So this burn may
+        // apply in the wrong direction as-is; needs a real ascending/
+        // descending-node check before trusting it.
         ManeuverNode BuildMidCourseCorrectionNode(Vessel vessel, CelestialBody destination, double ut)
         {
             double relIncDeg = Math.Abs(vessel.orbit.inclination - destination.orbit.inclination);
@@ -927,12 +945,12 @@ namespace KSPMacropad
                 return null;
 
             double relIncRad = relIncDeg * Math.PI / 180.0;
-            double vNow = vessel.orbit.getOrbitalSpeedAtUT(ut); // UNVERIFIED Orbit API
+            double vNow = vessel.orbit.getOrbitalVelocityAtUT(ut).magnitude; // confirmed real method (getOrbitalSpeedAtUT does NOT exist)
             double normalDv = 2.0 * vNow * Math.Sin(relIncRad / 2.0);
 
             ManeuverNode node = vessel.patchedConicSolver.AddManeuverNode(ut);
-            node.DeltaV = new Vector3d(0, normalDv, 0); // normal-only, no prograde component
-            vessel.patchedConicSolver.UpdateFlightPlan(); // UNVERIFIED
+            node.DeltaV = new Vector3d(0, normalDv, 0); // normal-only, no prograde component - see sign caveat above
+            vessel.patchedConicSolver.UpdateFlightPlan(); // confirmed real method, no documented params
             return node;
         }
 
@@ -1014,12 +1032,15 @@ namespace KSPMacropad
                 ? Math.Min(TRANSFER_SEARCH_MAX_DEPARTURES, (int)Math.Ceiling(synodicPeriod / vesselPeriod) + 1)
                 : 1; // not on a stable elliptical orbit - only the immediate next periapsis is usable
 
-            double departureUT = vessel.orbit.NextPeriapsisTime(currentUT); // UNVERIFIED Orbit API
+            // Orbit has no NextPeriapsisTime(UT) method (checked against the
+            // KSP API docs - it doesn't exist); timeToPe is the real,
+            // confirmed property for this.
+            double departureUT = currentUT + vessel.orbit.timeToPe;
 
             for (int d = 0; d < maxCandidates && departureUT < currentUT + synodicPeriod; d++)
             {
-                Vector3d r1vec = originBody.orbit.getRelativePositionAtUT(departureUT); // UNVERIFIED Orbit API
-                Vector3d vOriginAtDep = originBody.orbit.getOrbitalVelocityAtUT(departureUT); // UNVERIFIED - see frame-mismatch caveat on DoAutopilot
+                Vector3d r1vec = originBody.orbit.getRelativePositionAtUT(departureUT); // confirmed real method
+                Vector3d vOriginAtDep = originBody.orbit.getOrbitalVelocityAtUT(departureUT); // confirmed real method - see frame-consistency note on DoAutopilot
 
                 for (int t = 0; t < TRANSFER_SEARCH_TOF_SAMPLES; t++)
                 {
@@ -1232,12 +1253,17 @@ namespace KSPMacropad
             return 1.0 / 6.0 - z / 120.0 + z * z / 5040.0;
         }
 
-        // UNVERIFIED: stock KSP's public dV readout (added ~1.11) is
-        // reached through vessel.VesselDeltaV.TotalDeltaVActual in most
-        // versions, but the exact type/property names should be checked
-        // against the real KSP assemblies once available (same caveat as
-        // every other unverified API call in this file - no KSP install to
-        // test against on this dev machine).
+        // STILL UNCONFIRMED after actually checking: every other API call
+        // in this file that was flagged UNVERIFIED got checked against the
+        // real KSP API docs and either confirmed or fixed (see git history/
+        // comments above). This one didn't - the old fan-maintained API
+        // doc site used for those checks predates stock KSP's dV readout
+        // (added ~1.11), and the GitHub source that would confirm the
+        // exact field name (kOS's own delta-v reader, PR #2719) couldn't be
+        // fetched from here. vessel.VesselDeltaV.TotalDeltaVActual is a
+        // reasonable guess at the real name, not a confirmed one - check it
+        // against Assembly-CSharp (e.g. with ILSpy/dnSpy) or that kOS PR
+        // before trusting it.
         double GetVesselDeltaV(Vessel vessel)
         {
             if (vessel.VesselDeltaV == null)
