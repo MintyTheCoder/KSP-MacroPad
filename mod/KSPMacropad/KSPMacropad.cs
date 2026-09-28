@@ -14,7 +14,30 @@ namespace KSPMacropad
         private Queue<byte[]> messageQueue = new Queue<byte[]>();
         private readonly object queueLock = new object();
 
-        private byte[] ledStates = new byte[15];
+        // Every key that actually has LED states defined (see LEDStates.cs /
+        // STATE_COLORS on the firmware side). Excludes 0x0B (PRECISION INPUT
+        // TOGGLE) and 0x0E (AUX MODE TOGGLE) - both onboard-only, no LED
+        // states exist for them. NOTE: an earlier version of this file (and
+        // the project doc) wrongly said 0x08 (DOCKING PREP) was the excluded
+        // one instead of 0x0B - DOCK does have LED states, it's tracked here.
+        private static readonly byte[] TrackedKeyIds =
+        {
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+            0x08, 0x09, 0x0A, 0x0C, 0x0D, 0x0F
+        };
+
+        // key_id -> index into ledStates. Index 14 (== TrackedKeyIds.Length)
+        // is the shared underglow slot, matching the 14+1=15 sizing below.
+        private static readonly Dictionary<byte, int> KeyIdToStateIndex = BuildKeyIdIndex();
+        private static Dictionary<byte, int> BuildKeyIdIndex()
+        {
+            var map = new Dictionary<byte, int>();
+            for (int i = 0; i < TrackedKeyIds.Length; i++)
+                map[TrackedKeyIds[i]] = i;
+            return map;
+        }
+
+        private byte[] ledStates = new byte[TrackedKeyIds.Length + 1];
 
         private bool running = false;
 
@@ -190,6 +213,7 @@ namespace KSPMacropad
 
             SendHeartbeat();
             SendTelemetry();
+            CheckLEDStates();
         }
 
         // Sent on a fixed interval regardless of state change (the one
@@ -293,14 +317,131 @@ namespace KSPMacropad
         {
             Array.Clear(ledStates, 0, ledStates.Length);
 
-            for (int i = 0; i < 14; i++)
+            // FIX: this used to be `for (i = 0; i < 14; i++) UpdateLED((byte)i, ...)`,
+            // which sent raw IDs 0x00-0x0D - wrongly touching 0x0B (no LED
+            // states exist for it) and never touching 0x0F (AUTOPILOT, which
+            // does have LED states). Iterating the real tracked-key list instead.
+            foreach (byte keyId in TrackedKeyIds)
             {
-                UpdateLED((byte)i, 0x00, 0x00);
+                UpdateLED(keyId, 0x00, 0x00);
             }
 
             UpdateUnderglow(0x00, 0x00);
         }
 
+        // Only sends an update when the resolved state actually differs from
+        // what was last sent for that key - same "diff, don't spam" pattern
+        // as the rest of the LED protocol.
+        void SetLEDState(byte keyId, byte state, byte data)
+        {
+            int idx = KeyIdToStateIndex[keyId];
+            if (ledStates[idx] != state)
+            {
+                ledStates[idx] = state;
+                UpdateLED(keyId, state, data);
+            }
+        }
+
+        void SetUnderglowState(byte state)
+        {
+            int idx = TrackedKeyIds.Length; // reserved shared slot
+            if (ledStates[idx] != state)
+            {
+                ledStates[idx] = state;
+                UpdateUnderglow(state, 0x00);
+            }
+        }
+
+        // Only RESOURCE MONITOR and UNDERGLOW are implemented here - both are
+        // pure "read current game state, map to a color" checks. Every other
+        // tracked key's non-IDLE states (CIRC_CALCULATING vs CIRC_WARPING,
+        // LAUNCH_EXECUTING, etc.) depend on bookkeeping from inside that
+        // macro's own execution (is a burn in progress, is a node planned) -
+        // that doesn't exist yet since those macro bodies are still
+        // Debug.Log stubs above. They stay at whatever InitializeLEDs set
+        // (IDLE) until the macros themselves are written.
+        //
+        // NOT verified against a real KSP install/compile (no KSP on this
+        // dev machine per the project's usual workflow) - the resource
+        // iteration API in particular should be checked against the actual
+        // game before trusting this as-is.
+        void CheckLEDStates()
+        {
+            Vessel vessel = FlightGlobals.ActiveVessel;
+
+            if (vessel == null)
+            {
+                SetLEDState(0x0D, LEDStates.RESOURCE_IDLE, 0x00);
+                SetUnderglowState(LEDStates.UNDERGLOW_CONNECTED_NOVESSEL);
+                return;
+            }
+
+            // --- RESOURCE MONITOR (0x0D) ---
+            // Thresholds below are placeholders - pick numbers that feel
+            // right in-game, these haven't been tuned against real play.
+            // RESOURCE_DEPLETING intentionally not set: distinguishing "low"
+            // from "actively draining fast" needs a rate-of-change check
+            // (comparing fraction across frames), not just a snapshot -
+            // left for later.
+            double resourceFraction = GetLowestResourceFraction(vessel);
+            byte resourceState;
+            if (resourceFraction >= 0.50) resourceState = LEDStates.RESOURCE_NOMINAL;
+            else if (resourceFraction >= 0.25) resourceState = LEDStates.RESOURCE_LOW;
+            else if (resourceFraction >= 0.10) resourceState = LEDStates.RESOURCE_VERYLOW;
+            else resourceState = LEDStates.RESOURCE_CRITICAL;
+            SetLEDState(0x0D, resourceState, 0x00);
+
+            // --- UNDERGLOW ---
+            byte underglowState;
+            switch (vessel.situation)
+            {
+                case Vessel.Situations.PRELAUNCH:
+                    underglowState = LEDStates.UNDERGLOW_LAUNCHPAD;
+                    break;
+                case Vessel.Situations.LANDED:
+                case Vessel.Situations.SPLASHED:
+                    underglowState = LEDStates.UNDERGLOW_LANDING;
+                    break;
+                case Vessel.Situations.ORBITING:
+                case Vessel.Situations.ESCAPING:
+                    underglowState = LEDStates.UNDERGLOW_STABLE_ORBIT;
+                    break;
+                default: // FLYING, SUB_ORBITAL, DOCKED
+                    underglowState = LEDStates.UNDERGLOW_ASCENT;
+                    break;
+            }
+
+            if (TimeWarp.CurrentRateIndex > 0 && TimeWarp.WarpMode == TimeWarp.Modes.HIGH)
+                underglowState = LEDStates.UNDERGLOW_TIMEWARP; // overrides situation while warping
+
+            if (resourceState == LEDStates.RESOURCE_CRITICAL)
+                underglowState = LEDStates.UNDERGLOW_CRITICAL_RESOURCE; // overrides everything else
+
+            SetUnderglowState(underglowState);
+        }
+
+        // NOTE: unverified against the real KSP resource API - GetActiveResources()
+        // signature/behavior should be double-checked once KSP is available to test.
+        double GetLowestResourceFraction(Vessel vessel)
+        {
+            double lowest = 1.0;
+            bool any = false;
+
+            foreach (var resource in vessel.GetActiveResources())
+            {
+                if (resource.maxAmount <= 0)
+                    continue;
+
+                any = true;
+                double frac = resource.amount / resource.maxAmount;
+                if (frac < lowest)
+                    lowest = frac;
+            }
+
+            return any ? lowest : 1.0;
+        }
+
     }
+
 
 }
