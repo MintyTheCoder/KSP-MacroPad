@@ -62,6 +62,13 @@ namespace KSPMacropad
         private int lastSentQueueLength = -1;
 
         private bool suicideBurnArmed = false;
+        private bool suicideBurning = false;
+        private const double SUICIDE_SAFETY_FACTOR = 1.15;       // trigger when radar altitude <= stopping distance x this (+ margin)
+        private const double SUICIDE_MARGIN_METERS = 10.0;       // aim to finish braking this far above the ground
+        private const double SUICIDE_IMMINENT_FACTOR = 2.0;      // LED goes IMMINENT and SAS swings retrograde inside this x the trigger height
+        private const double SUICIDE_TOUCHDOWN_SPEED = 2.0;      // m/s - final descent speed
+        private const double SUICIDE_SPEED_GAIN = 1.0;           // m/s^2 of extra braking per m/s over touchdown speed, final phase
+        private const double SUICIDE_ALIGN_TOLERANCE_DEG = 30.0; // no throttle while pointed further than this from retrograde
         private bool resourceMonitorPanelOpen = false;
 
         // AUTOPILOT state machine (see StartAutopilot/TickAutopilot below).
@@ -243,7 +250,7 @@ namespace KSPMacropad
 
                             case 0x0A:
                                 Debug.Log("[KSPMacropad] KEY PRESSED: SUICIDE BURN ARM");
-                                DoSuicideBurnArm();
+                                RequestFlyingMacro(0x0A);
                                 break;
 
                             case 0x0B:
@@ -296,6 +303,7 @@ namespace KSPMacropad
             TickGravityTurn();
             TickRendezvous();
             TickHeadingHold();
+            TickSuicideBurn();
         }
 
         // Sent on a fixed interval regardless of state change (the one
@@ -666,17 +674,148 @@ namespace KSPMacropad
             // one-shot response to this key.
         }
 
-        // Only the ARM step - sets the flag and LED. The actual continuous
-        // TWR/altitude/velocity monitor and auto-fire-at-trigger-point logic
-        // (SUICIDEBURN_IMMINENT / SUICIDEBURN_BURNING) is real flight-
-        // dynamics math (estimating stopping distance from current
-        // velocity/TWR/altitude) - that's part of the "hard" batch, not
-        // implemented here. suicideBurnArmed exists so that monitor has
-        // something to check once it's written.
-        void DoSuicideBurnArm()
+        // ------------------------------------------------------------------
+        // SUICIDE BURN ARM (0x0A): a flying macro, so it can be queued
+        // (e.g. behind DEORBIT on an airless body) and a second hold of the
+        // key disarms it. While armed it watches the descent: once radar
+        // altitude drops inside SUICIDE_IMMINENT_FACTOR x the trigger height
+        // the LED goes IMMINENT and SAS swings to surface retrograde; at the
+        // trigger height (stopping distance at full thrust x
+        // SUICIDE_SAFETY_FACTOR + SUICIDE_MARGIN_METERS) it starts burning.
+        // During the burn the throttle is set each frame to the deceleration
+        // needed to reach SUICIDE_TOUCHDOWN_SPEED at the margin height, then
+        // holds that speed down to touchdown.
+        //
+        // Stopping distance uses total surface speed, not just vertical,
+        // so horizontal velocity makes it trigger earlier (safer). Drag is
+        // ignored, which also errs early. Thrust is each ignited engine's
+        // MaxThrustOutputAtm() - current-atmosphere thrust with the thrust
+        // limiter applied.
+        // ------------------------------------------------------------------
+        MacroStart StartSuicideBurn()
         {
+            Vessel vessel = FlightGlobals.ActiveVessel;
+            if (vessel == null)
+                return MacroStart.Failed;
+
+            Vessel.Situations s = vessel.situation;
+            if (s == Vessel.Situations.PRELAUNCH || s == Vessel.Situations.LANDED || s == Vessel.Situations.SPLASHED)
+            {
+                Debug.Log("[KSPMacropad] SUICIDE BURN: already on the ground");
+                return MacroStart.Failed;
+            }
+
+            if (AvailableThrust(vessel) <= 0)
+            {
+                Debug.Log("[KSPMacropad] SUICIDE BURN: no ignited engines - stage an engine before arming");
+                return MacroStart.Failed;
+            }
+
             suicideBurnArmed = true;
+            suicideBurning = false;
             SetLEDState(0x0A, LEDStates.SUICIDEBURN_ARMED, 0x00);
+            return MacroStart.Started;
+        }
+
+        void TickSuicideBurn()
+        {
+            if (!suicideBurnArmed)
+                return;
+
+            Vessel vessel = FlightGlobals.ActiveVessel;
+            if (vessel == null)
+                return;
+
+            if (vessel.situation == Vessel.Situations.LANDED || vessel.situation == Vessel.Situations.SPLASHED)
+            {
+                StopSuicideBurn(vessel, "touched down", true);
+                return;
+            }
+
+            double mass = vessel.GetTotalMass();
+            double aMax = mass > 0 ? AvailableThrust(vessel) / mass : 0; // kN / t = m/s^2
+            double r = vessel.mainBody.Radius + vessel.altitude;
+            double g = vessel.mainBody.gravParameter / (r * r);
+            double height = vessel.radarAltitude;
+            double vDown = -vessel.verticalSpeed;
+            Vector3d srfVelocity = ToVector3d(vessel.GetSrfVelocity());
+            double speed = srfVelocity.magnitude;
+
+            if (!suicideBurning)
+            {
+                double trigger = OrbitMath.StoppingDistance(speed, aMax, g) * SUICIDE_SAFETY_FACTOR + SUICIDE_MARGIN_METERS;
+
+                if (vDown <= 0 || height > trigger * SUICIDE_IMMINENT_FACTOR)
+                {
+                    SetLEDState(0x0A, LEDStates.SUICIDEBURN_ARMED, 0x00);
+                    return;
+                }
+
+                PointSurfaceRetrograde(vessel, srfVelocity);
+
+                if (height > trigger)
+                {
+                    SetLEDState(0x0A, LEDStates.SUICIDEBURN_IMMINENT, 0x00);
+                    return;
+                }
+
+                suicideBurning = true;
+                SetLEDState(0x0A, LEDStates.SUICIDEBURN_BURNING, 0x00);
+                Debug.Log("[KSPMacropad] SUICIDE BURN: burning at " + height.ToString("F0") + " m, " +
+                    speed.ToString("F1") + " m/s" + (aMax <= g ? " (TWR below 1 - can't fully stop)" : ""));
+            }
+
+            double pointingError = PointSurfaceRetrograde(vessel, srfVelocity);
+            double throttle = OrbitMath.SuicideBurnThrottle(speed, vDown, height - SUICIDE_MARGIN_METERS, aMax, g,
+                SUICIDE_TOUCHDOWN_SPEED, SUICIDE_SPEED_GAIN);
+            if (pointingError > SUICIDE_ALIGN_TOLERANCE_DEG)
+                throttle = 0;
+
+            FlightInputHandler.state.mainThrottle = (float)throttle;
+        }
+
+        // Locks SAS onto surface retrograde (straight up once nearly
+        // stopped, where the velocity direction is just noise). Returns the
+        // current angle between the nose and that direction.
+        double PointSurfaceRetrograde(Vessel vessel, Vector3d srfVelocity)
+        {
+            LocalFrame(vessel, out Vector3d up, out Vector3d north, out Vector3d east);
+            Vector3d direction = srfVelocity.magnitude > 1.0 ? -srfVelocity.normalized : up;
+            Vector3d rollReference = OrbitMath.PerpendicularReference(direction, north, east);
+
+            EnsureSAS(vessel);
+            if (vessel.Autopilot.Mode != VesselAutopilot.AutopilotMode.StabilityAssist)
+                vessel.Autopilot.SetMode(VesselAutopilot.AutopilotMode.StabilityAssist);
+            vessel.Autopilot.SAS.LockRotation(NoseRotation(direction, rollReference));
+
+            return OrbitMath.AngleDeg(ToVector3d(vessel.ReferenceTransform.up), direction);
+        }
+
+        // Sum of max thrust (kN) across ignited, non-flamed-out engines at
+        // current atmospheric conditions, thrust limiters applied.
+        static double AvailableThrust(Vessel vessel)
+        {
+            double thrust = 0;
+            foreach (ModuleEngines engine in vessel.FindPartModulesImplementing<ModuleEngines>())
+            {
+                if (engine.EngineIgnited && !engine.flameout)
+                    thrust += engine.MaxThrustOutputAtm();
+            }
+            return thrust;
+        }
+
+        void StopSuicideBurn(Vessel vessel, string reason, bool success)
+        {
+            Debug.Log("[KSPMacropad] SUICIDE BURN: stopped - " + reason);
+            if (suicideBurning)
+                FlightInputHandler.state.mainThrottle = 0f;
+
+            suicideBurnArmed = false;
+            suicideBurning = false;
+            if (vessel != null)
+                vessel.Autopilot.SetMode(VesselAutopilot.AutopilotMode.StabilityAssist);
+            SetLEDState(0x0A, LEDStates.SUICIDEBURN_IDLE, 0x00);
+            OnMacroFinished(0x0A, success);
         }
 
         // UNVERIFIED: exact IScienceDataContainer/IScienceDataTransmitter
@@ -1124,7 +1263,7 @@ namespace KSPMacropad
 
         // ------------------------------------------------------------------
         // Flying-macro queue. AGT, CIRCULARIZE, INTERCEPT, ORBIT SYNC,
-        // DEORBIT and AUTOPILOT all take over throttle and SAS, so only one
+        // DEORBIT, SUICIDE BURN and AUTOPILOT all take over throttle and SAS, so only one
         // runs at a time. Pressing one of those keys:
         //   - while it's the one running: cancels it
         //   - while it's already queued: removes it from the queue
@@ -1176,6 +1315,7 @@ namespace KSPMacropad
                 case 0x04: result = StartInterceptCalc(fromQueue); break;
                 case 0x05: result = StartOrbitSync(); break;
                 case 0x07: result = StartDeorbitBurn(); break;
+                case 0x0A: result = StartSuicideBurn(); break;
                 case 0x0F: result = StartAutopilot(); break;
                 default: result = MacroStart.Failed; break;
             }
@@ -1231,6 +1371,7 @@ namespace KSPMacropad
             switch (activeMacroKey)
             {
                 case 0x01: StopGravityTurn(vessel, "cancelled by keypress", false); break;
+                case 0x0A: StopSuicideBurn(vessel, "disarmed by keypress", false); break;
                 case 0x0F: AbortAutopilot(vessel, "cancelled by keypress"); break;
                 default: CancelNodeJob("cancelled by keypress"); break;
             }
@@ -1245,6 +1386,7 @@ namespace KSPMacropad
                 case 0x04: return "INTERCEPT";
                 case 0x05: return "ORBIT SYNC";
                 case 0x07: return "DEORBIT";
+                case 0x0A: return "SUICIDE BURN";
                 case 0x0F: return "AUTOPILOT";
                 default: return "0x" + keyId.ToString("X2");
             }
@@ -2330,6 +2472,55 @@ namespace KSPMacropad
 
             double m = maxDeg * Math.PI / 180.0;
             return f * Math.Cos(m) + perp.normalized * Math.Sin(m);
+        }
+
+        // Distance needed to brake from `speed` to zero at full thrust against
+        // gravity. Infinite when thrust can't beat gravity.
+        public static double StoppingDistance(double speed, double aMax, double g)
+        {
+            if (aMax <= g)
+                return double.PositiveInfinity;
+            return speed * speed / (2.0 * (aMax - g));
+        }
+
+        // Throttle (0-1) for the braking phase of a suicide burn. Above
+        // touchdownSpeed: the constant deceleration that reaches
+        // touchdownSpeed exactly heightToTarget from now, plus gravity.
+        // At or below it: hold the descent at touchdownSpeed with a simple
+        // proportional correction. Zero when climbing and already slow.
+        public static double SuicideBurnThrottle(double speed, double vDown, double heightToTarget, double aMax,
+            double g, double touchdownSpeed, double speedGain)
+        {
+            if (aMax <= 0)
+                return 0;
+
+            double accel;
+            if (speed > touchdownSpeed)
+            {
+                double h = Math.Max(heightToTarget, 0.5);
+                accel = (speed * speed - touchdownSpeed * touchdownSpeed) / (2.0 * h) + g;
+            }
+            else if (vDown < 0)
+            {
+                return 0;
+            }
+            else
+            {
+                accel = g + speedGain * (vDown - touchdownSpeed);
+            }
+
+            return Math.Max(0.0, Math.Min(1.0, accel / aMax));
+        }
+
+        // Unit vector perpendicular to `direction`, taken from `preferred`
+        // (or `fallback` if preferred is nearly parallel to it).
+        public static Vector3d PerpendicularReference(Vector3d direction, Vector3d preferred, Vector3d fallback)
+        {
+            Vector3d d = direction.normalized;
+            Vector3d p = preferred - d * Vector3d.Dot(preferred, d);
+            if (p.magnitude < 1e-3)
+                p = fallback - d * Vector3d.Dot(fallback, d);
+            return p.normalized;
         }
 
         // Wraps any integer degree value into 0-359 (C#'s % keeps the sign).
