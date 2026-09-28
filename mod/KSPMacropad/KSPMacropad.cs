@@ -18,6 +18,20 @@ namespace KSPMacropad
 
         private bool running = false;
 
+        // Reserved inbound-to-pad IDs outside the key (0x00-0x0F) / underglow
+        // (0x10-0x13) ranges - same 5-byte frame as UpdateLED, just new
+        // meanings. Must match firmware's HEARTBEAT_ID/THROTTLE_TELEMETRY_ID/
+        // WARP_TELEMETRY_ID exactly.
+        private const byte HEARTBEAT_ID = 0x14;
+        private const byte THROTTLE_TELEMETRY_ID = 0x15;
+        private const byte WARP_TELEMETRY_ID = 0x16;
+
+        private const float HEARTBEAT_INTERVAL = 1.0f; // seconds; must stay well under firmware's HEARTBEAT_TIMEOUT (3.0s)
+
+        private float lastHeartbeatTime = 0f;
+        private int lastSentThrottle = -1; // -1 = never sent yet, forces the first send
+        private int lastSentWarp = -1;
+
         void Start()
         {
             Debug.Log("[KSPMacropad] KSP Macropad loaded.");
@@ -173,8 +187,46 @@ namespace KSPMacropad
                 }
 
             }
+
+            SendHeartbeat();
+            SendTelemetry();
         }
-        
+
+        // Sent on a fixed interval regardless of state change (the one
+        // exception to the "only send on diff" rule) - lets the pad show
+        // a real CONN/NO CONN indicator instead of guessing.
+        void SendHeartbeat()
+        {
+            if (Time.time - lastHeartbeatTime < HEARTBEAT_INTERVAL)
+                return;
+
+            lastHeartbeatTime = Time.time;
+            UpdateLED(HEARTBEAT_ID, 0x00, 0x00);
+        }
+
+        // Mode-1 OLED telemetry: live throttle % and warp index, diffed
+        // against the last value actually sent (same "only on change"
+        // pattern as the LED states).
+        void SendTelemetry()
+        {
+            Vessel vessel = FlightGlobals.ActiveVessel;
+            if (vessel == null)
+                return;
+
+            int throttlePct = (int)Mathf.Clamp(vessel.ctrlState.mainThrottle * 100f, 0f, 100f);
+            if (throttlePct != lastSentThrottle)
+            {
+                lastSentThrottle = throttlePct;
+                UpdateLED(THROTTLE_TELEMETRY_ID, 0x00, (byte)throttlePct);
+            }
+
+            int warpIndex = TimeWarp.CurrentRateIndex;
+            if (warpIndex != lastSentWarp)
+            {
+                lastSentWarp = warpIndex;
+                UpdateLED(WARP_TELEMETRY_ID, 0x00, (byte)warpIndex);
+            }
+        }
 
         void ReadSerialLoop()
         {
@@ -210,7 +262,9 @@ namespace KSPMacropad
             }
         }
 
-        //LED packet structure: [0x77][led_id: 1 byte][state: 1 byte][data: 1 byte][0x44]
+        // Shared 5-byte outbound frame writer: [0x77][id][state][data][0x44].
+        // Used for LED updates as well as HEARTBEAT/telemetry - the name is
+        // legacy from when it only sent LED colors.
         void UpdateLED(byte led_id, byte state, byte data)
         {
             if (serialPort != null && serialPort.IsOpen)
@@ -249,5 +303,4 @@ namespace KSPMacropad
 
     }
 
-    
 }
