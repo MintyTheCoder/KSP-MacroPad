@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.IO.Ports;
 using System.Threading;
 using UnityEngine;
-using KSP.UI.Screens; // StageManager - namespace unverified, no KSP install to check against
+using KSP.UI.Screens; // StageManager (namespace confirmed against kOS's source)
 
 namespace KSPMacropad
 {
@@ -72,6 +72,33 @@ namespace KSPMacropad
         private int lastSentActiveMacro = -1;
         private int lastSentNextMacro = -1;
         private int lastSentQueueLength = -1;
+
+        // Continuous LED-state bookkeeping for the one-shot macros (see CheckLEDStates).
+        private double timeAccelTargetUT;
+        private float timeAccelStartTime;
+        private bool timeAccelSawWarp;
+        private bool dockingPrepActive = false;
+        private bool landingPrepActive = false;
+        private bool landingTouchedDown = false;
+        private IScienceDataTransmitter scienceTransmitter;
+        private float scienceStartTime;
+        private readonly Dictionary<string, double> lastResourceFraction = new Dictionary<string, double>();
+        private double lastResourceSampleUT = -1;
+        private int lastResourcePartCount = -1;
+        private Guid lastResourceVesselId;
+        private bool resourceDepleting = false;
+        private ITargetable autopilotPreviewTarget;
+        private float nextAutopilotPreviewTime = 0f;
+
+        private const float TIMEACCEL_START_GRACE = 3f;          // s for WarpTo to actually start warping
+        private const double DOCK_READY_DISTANCE = 20.0;         // m
+        private const double DOCK_READY_SPEED = 0.5;             // m/s relative
+        private const float SCIENCE_BUSY_GRACE = 0.5f;           // s before trusting IsBusy() after TransmitData
+        private const double RESOURCE_SAMPLE_INTERVAL = 1.0;     // game seconds between depletion-rate samples
+        private const double RESOURCE_DEPLETING_SECONDS = 30.0;  // DEPLETING when a resource would run dry within this
+        private const double MANEUVER_IMMINENT_SECONDS = 60.0;   // underglow warning before the next node
+        private const float AUTOPILOT_PREVIEW_INTERVAL = 30f;    // s between AUTOPILOT READY/IMPOSSIBLE previews
+        private static readonly HashSet<string> IgnoredResources = new HashSet<string> { "IntakeAir", "Ore" }; // normally empty or environmental
 
         private bool suicideBurnArmed = false;
         private bool suicideBurning = false;
@@ -572,6 +599,15 @@ namespace KSPMacropad
 
         void OnDestroy()
         {
+            // Leaving the flight scene: blank the pad instead of freezing it
+            // on whatever the last vessel showed.
+            foreach (byte keyId in TrackedKeyIds)
+                UpdateLED(keyId, 0x00, 0x00);
+            UpdateUnderglow(LEDStates.UNDERGLOW_IDLE, 0x00);
+            UpdateLED(ACTIVE_MACRO_TELEMETRY_ID, 0x00, NO_MACRO);
+            UpdateLED(NEXT_MACRO_TELEMETRY_ID, 0x00, NO_MACRO);
+            UpdateLED(QUEUE_LENGTH_TELEMETRY_ID, 0x00, 0x00);
+
             running = false;
             if (serialThread != null && serialThread.IsAlive)
                 serialThread.Join(500);
@@ -675,19 +711,9 @@ namespace KSPMacropad
             }
         }
 
-        // Only RESOURCE MONITOR and UNDERGLOW are implemented here - both are
-        // pure "read current game state, map to a color" checks. Every other
-        // tracked key's non-IDLE states (CIRC_CALCULATING vs CIRC_WARPING,
-        // LAUNCH_EXECUTING, etc.) depend on bookkeeping from inside that
-        // macro's own execution (is a burn in progress, is a node planned) -
-        // that doesn't exist yet since those macro bodies are still
-        // Debug.Log stubs above. They stay at whatever InitializeLEDs set
-        // (IDLE) until the macros themselves are written.
-        //
-        // NOT verified against a real KSP install/compile (no KSP on this
-        // dev machine per the project's usual workflow) - the resource
-        // iteration API in particular should be checked against the actual
-        // game before trusting this as-is.
+        // Continuous LED checks, every frame: states that depend on how the
+        // game evolves after a one-shot macro fired, plus the pure
+        // "read game state, map to a colour" keys and the underglow.
         void CheckLEDStates()
         {
             Vessel vessel = FlightGlobals.ActiveVessel;
@@ -699,24 +725,90 @@ namespace KSPMacropad
                 return;
             }
 
+            double now = Planetarium.GetUniversalTime();
+            Vessel.Situations situation = vessel.situation;
+
+            // --- LAUNCH SEQUENCE (0x00): complete once out of the atmosphere ---
+            byte launch = LedState(0x00);
+            if (launch == LEDStates.LAUNCH_EXECUTING &&
+                (situation == Vessel.Situations.SUB_ORBITAL || situation == Vessel.Situations.ORBITING || situation == Vessel.Situations.ESCAPING))
+                SetLEDState(0x00, LEDStates.LAUNCH_COMPLETE, 0x00);
+            else if (launch != LEDStates.LAUNCH_IDLE && (situation == Vessel.Situations.LANDED || situation == Vessel.Situations.SPLASHED))
+                SetLEDState(0x00, LEDStates.LAUNCH_IDLE, 0x00);
+
+            // --- TIME ACCEL (0x03): back to idle when the warp ends or is stopped ---
+            if (LedState(0x03) == LEDStates.TIMEACCEL_WARPING)
+            {
+                if (TimeWarp.CurrentRateIndex > 0)
+                    timeAccelSawWarp = true;
+                bool ended = timeAccelSawWarp ? TimeWarp.CurrentRateIndex == 0
+                                              : Time.time - timeAccelStartTime > TIMEACCEL_START_GRACE;
+                if (ended || now >= timeAccelTargetUT)
+                    SetLEDState(0x03, LEDStates.TIMEACCEL_IDLE, 0x00);
+            }
+
+            // --- DOCKING PREP (0x08): READY when close and nearly stopped ---
+            if (dockingPrepActive)
+            {
+                ITargetable target = FlightGlobals.fetch.VesselTarget;
+                if (target == null)
+                {
+                    // docking (or clearing the target) ends it
+                    dockingPrepActive = false;
+                    SetLEDState(0x08, LEDStates.DOCK_IDLE, 0x00);
+                }
+                else
+                {
+                    Vector3d relPos = ToVector3d(target.GetTransform().position) - vessel.GetWorldPos3D();
+                    double relSpeed = (vessel.obt_velocity - target.GetObtVelocity()).magnitude;
+                    bool ready = relPos.magnitude < DOCK_READY_DISTANCE && relSpeed < DOCK_READY_SPEED;
+                    SetLEDState(0x08, ready ? LEDStates.DOCK_READY : LEDStates.DOCK_TARGET_ACQUIRED, 0x00);
+                }
+            }
+
+            // --- LANDING PREP (0x09): COMPLETE on touchdown, IDLE once airborne again ---
+            if (landingPrepActive)
+            {
+                bool down = situation == Vessel.Situations.LANDED || situation == Vessel.Situations.SPLASHED;
+                if (down)
+                {
+                    landingTouchedDown = true;
+                    SetLEDState(0x09, LEDStates.LANDING_COMPLETE, 0x00);
+                }
+                else if (landingTouchedDown)
+                {
+                    landingPrepActive = false;
+                    SetLEDState(0x09, LEDStates.LANDING_IDLE, 0x00);
+                }
+            }
+
+            // --- TRANSMIT SCIENCE (0x0C): COMPLETE once the transmitter goes idle ---
+            if (LedState(0x0C) == LEDStates.SCIENCE_TRANSMITTING && scienceTransmitter != null &&
+                Time.time - scienceStartTime > SCIENCE_BUSY_GRACE && !scienceTransmitter.IsBusy())
+            {
+                scienceTransmitter = null;
+                SetLEDState(0x0C, LEDStates.SCIENCE_COMPLETE, 0x00);
+            }
+
             // --- RESOURCE MONITOR (0x0D) ---
-            // Thresholds below are placeholders - pick numbers that feel
-            // right in-game, these haven't been tuned against real play.
-            // RESOURCE_DEPLETING intentionally not set: distinguishing "low"
-            // from "actively draining fast" needs a rate-of-change check
-            // (comparing fraction across frames), not just a snapshot -
-            // left for later.
-            double resourceFraction = GetLowestResourceFraction(vessel);
+            // Level thresholds are placeholders - tune them in play.
+            double resourceFraction = SampleResources(vessel, now);
             byte resourceState;
             if (resourceFraction >= 0.50) resourceState = LEDStates.RESOURCE_NOMINAL;
             else if (resourceFraction >= 0.25) resourceState = LEDStates.RESOURCE_LOW;
             else if (resourceFraction >= 0.10) resourceState = LEDStates.RESOURCE_VERYLOW;
             else resourceState = LEDStates.RESOURCE_CRITICAL;
+            if (resourceDepleting && resourceState != LEDStates.RESOURCE_CRITICAL)
+                resourceState = LEDStates.RESOURCE_DEPLETING;
             SetLEDState(0x0D, resourceState, 0x00);
 
-            // --- UNDERGLOW ---
+            // --- AUTOPILOT (0x0F): READY / IMPOSSIBLE preview while idle ---
+            if (activeMacroKey != 0x0F)
+                PreviewAutopilot(vessel);
+
+            // --- UNDERGLOW: situation, then overrides in increasing priority ---
             byte underglowState;
-            switch (vessel.situation)
+            switch (situation)
             {
                 case Vessel.Situations.PRELAUNCH:
                     underglowState = LEDStates.UNDERGLOW_LAUNCHPAD;
@@ -735,42 +827,113 @@ namespace KSPMacropad
             }
 
             if (TimeWarp.CurrentRateIndex > 0 && TimeWarp.WarpMode == TimeWarp.Modes.HIGH)
-                underglowState = LEDStates.UNDERGLOW_TIMEWARP; // overrides situation while warping
+                underglowState = LEDStates.UNDERGLOW_TIMEWARP;
+
+            if (activeMacroKey != NO_MACRO)
+                underglowState = LEDStates.UNDERGLOW_AUTOPILOT;   // a pad macro is flying the vessel
+
+            if (vessel.patchedConicSolver != null && vessel.patchedConicSolver.maneuverNodes.Count > 0)
+            {
+                double toNode = vessel.patchedConicSolver.maneuverNodes[0].UT - now;
+                if (toNode >= 0 && toNode <= MANEUVER_IMMINENT_SECONDS)
+                    underglowState = LEDStates.UNDERGLOW_MANEUVER_IMMINENT;
+            }
+
+            if (CommNetEnabled() && vessel.Connection != null && !vessel.Connection.IsConnected)
+                underglowState = LEDStates.UNDERGLOW_COMMS_LOST;
 
             if (resourceState == LEDStates.RESOURCE_CRITICAL)
-                underglowState = LEDStates.UNDERGLOW_CRITICAL_RESOURCE; // overrides everything else
+                underglowState = LEDStates.UNDERGLOW_CRITICAL_RESOURCE;
 
             SetUnderglowState(underglowState);
         }
 
-        // NOTE: unverified against the real KSP resource API - GetActiveResources()
-        // signature/behavior should be double-checked once KSP is available to test.
-        double GetLowestResourceFraction(Vessel vessel)
+        byte LedState(byte keyId)
         {
-            double lowest = 1.0;
-            bool any = false;
+            return ledStates[KeyIdToStateIndex[keyId]];
+        }
 
-            foreach (var resource in vessel.GetActiveResources())
+        // HighLogic.CurrentGame.Parameters.Difficulty.EnableCommNet, the same
+        // check kOS uses - CommNet can be switched off in difficulty settings.
+        static bool CommNetEnabled()
+        {
+            return HighLogic.CurrentGame != null && HighLogic.CurrentGame.Parameters.Difficulty.EnableCommNet;
+        }
+
+        // Lowest fill fraction across the vessel's resources, totalled per
+        // resource type over every part (so one empty drop tank doesn't read
+        // as critical). Skips locked tanks and resources that are normally
+        // empty (IntakeAir, Ore). Also updates resourceDepleting: true when
+        // any resource is draining fast enough to run dry within
+        // RESOURCE_DEPLETING_SECONDS. Picks up modded resources (e.g.
+        // Community Resource Pack) automatically since it reads every part
+        // resource rather than a fixed list.
+        double SampleResources(Vessel vessel, double now)
+        {
+            Dictionary<string, double[]> totals = new Dictionary<string, double[]>();
+            foreach (Part part in vessel.parts)
             {
-                if (resource.maxAmount <= 0)
-                    continue;
-
-                any = true;
-                double frac = resource.amount / resource.maxAmount;
-                if (frac < lowest)
-                    lowest = frac;
+                for (int i = 0; i < part.Resources.Count; i++)
+                {
+                    PartResource r = part.Resources[i];
+                    if (r.maxAmount <= 0 || !r.flowState || IgnoredResources.Contains(r.resourceName))
+                        continue;
+                    double[] t;
+                    if (!totals.TryGetValue(r.resourceName, out t))
+                        totals[r.resourceName] = t = new double[2];
+                    t[0] += r.amount;
+                    t[1] += r.maxAmount;
+                }
             }
 
-            return any ? lowest : 1.0;
+            double lowest = 1.0;
+            foreach (KeyValuePair<string, double[]> kv in totals)
+                lowest = Math.Min(lowest, kv.Value[0] / kv.Value[1]);
+
+            // Staging, docking or switching vessels changes the totals in one
+            // step, which isn't consumption, so restart the rate baseline.
+            bool baselineInvalid = lastResourceSampleUT < 0 || now < lastResourceSampleUT ||
+                vessel.parts.Count != lastResourcePartCount || vessel.id != lastResourceVesselId;
+            if (baselineInvalid)
+            {
+                lastResourcePartCount = vessel.parts.Count;
+                lastResourceVesselId = vessel.id;
+                resourceDepleting = false;
+                lastResourceSampleUT = now;
+                lastResourceFraction.Clear();
+                foreach (KeyValuePair<string, double[]> kv in totals)
+                    lastResourceFraction[kv.Key] = kv.Value[0] / kv.Value[1];
+            }
+            else if (now - lastResourceSampleUT >= RESOURCE_SAMPLE_INTERVAL)
+            {
+                double dt = now - lastResourceSampleUT;
+                bool depleting = false;
+                foreach (KeyValuePair<string, double[]> kv in totals)
+                {
+                    double fraction = kv.Value[0] / kv.Value[1];
+                    double previous;
+                    if (lastResourceFraction.TryGetValue(kv.Key, out previous))
+                    {
+                        double ratePerSecond = (previous - fraction) / dt;
+                        if (ratePerSecond > 0 && fraction / ratePerSecond < RESOURCE_DEPLETING_SECONDS)
+                            depleting = true;
+                    }
+                }
+                resourceDepleting = depleting;
+
+                lastResourceFraction.Clear();
+                foreach (KeyValuePair<string, double[]> kv in totals)
+                    lastResourceFraction[kv.Key] = kv.Value[0] / kv.Value[1];
+                lastResourceSampleUT = now;
+            }
+
+            return lowest;
         }
 
         // ------------------------------------------------------------------
-        // Macro bodies - the "simple" batch: one-shot action-group toggles,
-        // no maneuver-node vector math or continuous closed-loop control.
-        // NONE OF THIS IS COMPILED OR TESTED against a real KSP install -
-        // written from known KSP modding API patterns, but exact method/
-        // namespace names (StageManager vs Staging, Autopilot call order,
-        // science API specifics) should be checked once KSP is on hand.
+        // One-shot macros: action groups and a single command each. Their
+        // follow-up LED states (COMPLETE, READY, back to IDLE) are driven by
+        // CheckLEDStates as the game state changes.
         // ------------------------------------------------------------------
 
         void DoLaunchSequence()
@@ -784,18 +947,14 @@ namespace KSPMacropad
             if (!vessel.ActionGroups[KSPActionGroup.SAS])
                 vessel.ActionGroups.ToggleGroup(KSPActionGroup.SAS);
 
-            StageManager.ActivateNextStage(); // UNVERIFIED: class name may be `Staging` in some KSP versions
+            if (StageManager.CanSeparate)
+                StageManager.ActivateNextStage();
 
             SetLEDState(0x00, LEDStates.LAUNCH_EXECUTING, 0x00);
-            // LAUNCH_COMPLETE is never set here - "launch complete" isn't a
-            // single event, it needs a definition (reached target apoapsis?
-            // left the atmosphere?) that hasn't been decided yet.
         }
 
         // Finds the earliest of (next maneuver node UT, next SOI-change UT)
-        // and warps to it. TimeWarp.WarpTo() auto-stops on arrival by itself,
-        // so no separate "stop warping" call is needed. No burn-direction
-        // risk here since this only controls time, not a burn vector.
+        // and warps to it. TimeWarp.WarpTo() stops by itself on arrival.
         void DoTimeAccelToNextEvent()
         {
             Vessel vessel = FlightGlobals.ActiveVessel;
@@ -816,12 +975,11 @@ namespace KSPMacropad
 
             if (nextEventUT.HasValue && nextEventUT.Value > currentUT)
             {
+                timeAccelTargetUT = nextEventUT.Value;
+                timeAccelStartTime = Time.time;
+                timeAccelSawWarp = false;
                 SetLEDState(0x03, LEDStates.TIMEACCEL_WARPING, 0x00);
                 TimeWarp.fetch.WarpTo(nextEventUT.Value);
-                // KNOWN GAP: nothing currently resets this LED back to IDLE
-                // once the warp completes - CheckLEDStates doesn't watch
-                // this key yet. Will show WARPING until something else
-                // changes it.
             }
             else
             {
@@ -845,15 +1003,14 @@ namespace KSPMacropad
             {
                 vessel.Autopilot.Enabled = true;
                 vessel.Autopilot.SetMode(VesselAutopilot.AutopilotMode.Target);
+                dockingPrepActive = true;
                 SetLEDState(0x08, LEDStates.DOCK_TARGET_ACQUIRED, 0x00);
             }
             else
             {
+                dockingPrepActive = false;
                 SetLEDState(0x08, LEDStates.DOCK_ACTIVE, 0x00);
             }
-            // DOCK_READY is not set here - needs a distance/closing-velocity
-            // check against the target, which belongs in a continuous
-            // monitor (CheckLEDStates), not this one-shot key handler.
         }
 
         void DoLandingPrep()
@@ -873,10 +1030,9 @@ namespace KSPMacropad
 
             FlightInputHandler.state.mainThrottle = 0f;
 
+            landingPrepActive = true;
+            landingTouchedDown = false;
             SetLEDState(0x09, LEDStates.LANDING_CONFIGURING, 0x00);
-            // LANDING_COMPLETE isn't set here - that's `vessel.Landed`
-            // going true, which is a continuous-check concern, not a
-            // one-shot response to this key.
         }
 
         // ------------------------------------------------------------------
@@ -1023,38 +1179,41 @@ namespace KSPMacropad
             OnMacroFinished(0x0A, success);
         }
 
-        // UNVERIFIED: exact IScienceDataContainer/IScienceDataTransmitter
-        // API shape (method names, whether DumpData is the right call here)
-        // needs checking against the real KSP assemblies.
         void DoTransmitScience()
         {
             Vessel vessel = FlightGlobals.ActiveVessel;
             if (vessel == null)
                 return;
 
-            List<IScienceDataTransmitter> transmitters = vessel.FindPartModulesImplementing<IScienceDataTransmitter>();
-            if (transmitters.Count == 0)
+            IScienceDataTransmitter transmitter = ScienceUtil.GetBestTransmitter(vessel);
+            if (transmitter == null)
             {
                 SetLEDState(0x0C, LEDStates.SCIENCE_UNAVAILABLE, 0x00);
                 return;
             }
 
+            // Same steps as the stock "transmit" button (per kOS, pulled from
+            // ModuleScienceExperiment.sendDataToComms): queue the data on the
+            // transmitter, then dump it from the experiment so it isn't kept
+            // and sent again on the next press.
             bool anyData = false;
-            foreach (var container in vessel.FindPartModulesImplementing<IScienceDataContainer>())
+            foreach (IScienceDataContainer container in vessel.FindPartModulesImplementing<IScienceDataContainer>())
             {
                 ScienceData[] data = container.GetData();
-                if (data.Length == 0)
+                if (data == null || data.Length == 0)
                     continue;
 
                 anyData = true;
-                foreach (var d in data)
-                    transmitters[0].TransmitData(new List<ScienceData> { d });
+                transmitter.TransmitData(new List<ScienceData>(data));
+                foreach (ScienceData d in data)
+                    container.DumpData(d);
             }
 
-            // SCIENCE_COMPLETE isn't set here - transmission finishes
-            // asynchronously in-game, which would need a completion
-            // callback/event, not something known at the moment of the
-            // keypress.
+            if (anyData)
+            {
+                scienceTransmitter = transmitter;
+                scienceStartTime = Time.time;
+            }
             SetLEDState(0x0C, anyData ? LEDStates.SCIENCE_TRANSMITTING : LEDStates.SCIENCE_UNAVAILABLE, 0x00);
         }
 
@@ -1110,70 +1269,102 @@ namespace KSPMacropad
         //     velocity vectors read from Orbit methods share one frame and
         //     can be combined directly. Documented for the class as a whole,
         //     not per-method - recheck once this runs against KSP.
+        private enum AutopilotCheck { NoTarget, Unsupported, NoWindow, NotEnoughDv, Ready }
+
+        // Everything AUTOPILOT needs to know before flying: is there an
+        // interplanetary target, a transfer window, and enough dv. Shared by
+        // the keypress and the idle READY/IMPOSSIBLE preview.
+        AutopilotCheck EvaluateAutopilot(Vessel vessel, bool log, out CelestialBody destinationBody,
+            out double departureUT, out double arrivalUT, out double ejectionDv, out double captureDv)
+        {
+            destinationBody = null;
+            departureUT = arrivalUT = ejectionDv = captureDv = 0;
+
+            ITargetable target = FlightGlobals.fetch.VesselTarget;
+            if (target == null)
+            {
+                if (log) Debug.Log("[KSPMacropad] AUTOPILOT: no target selected, nothing to plan against");
+                return AutopilotCheck.NoTarget;
+            }
+
+            destinationBody = target as CelestialBody;
+            if (destinationBody == null && target is Vessel targetVessel)
+                destinationBody = targetVessel.mainBody;
+
+            CelestialBody originBody = vessel.mainBody;
+            if (destinationBody == null || destinationBody == originBody)
+            {
+                if (log) Debug.Log("[KSPMacropad] AUTOPILOT: target isn't another planet's SOI");
+                return AutopilotCheck.Unsupported;
+            }
+
+            // Only "vessel orbiting a planet, transferring to another planet" -
+            // moon-to-elsewhere cases, or a vessel already heliocentric, aren't covered.
+            if (originBody.referenceBody == null || originBody.referenceBody != Planetarium.fetch.Sun ||
+                destinationBody.referenceBody != Planetarium.fetch.Sun)
+            {
+                if (log) Debug.Log("[KSPMacropad] AUTOPILOT: only planet-to-planet transfers are supported");
+                return AutopilotCheck.Unsupported;
+            }
+
+            if (!FindBestTransferWindow(vessel, originBody, destinationBody,
+                out departureUT, out arrivalUT, out ejectionDv, out captureDv))
+            {
+                if (log) Debug.Log("[KSPMacropad] AUTOPILOT: no valid transfer window found in the search window");
+                return AutopilotCheck.NoWindow;
+            }
+
+            double requiredDv = ejectionDv + captureDv;
+            double availableDv = GetVesselDeltaV(vessel);
+            if (log)
+                Debug.Log("[KSPMacropad] AUTOPILOT: departureUT=" + departureUT + " arrivalUT=" + arrivalUT +
+                    " required dv=" + requiredDv + " (ejection=" + ejectionDv + " capture=" + captureDv +
+                    ") available dv=" + availableDv);
+
+            return availableDv >= requiredDv ? AutopilotCheck.Ready : AutopilotCheck.NotEnoughDv;
+        }
+
+        static byte AutopilotPreviewState(AutopilotCheck check)
+        {
+            switch (check)
+            {
+                case AutopilotCheck.Ready: return LEDStates.AUTOPILOT_READY;
+                case AutopilotCheck.NoWindow:
+                case AutopilotCheck.NotEnoughDv: return LEDStates.AUTOPILOT_IMPOSSIBLE;
+                default: return LEDStates.AUTOPILOT_IDLE;
+            }
+        }
+
+        // Green/red on the AUTOPILOT key before it's pressed. The window
+        // search is the expensive part (hundreds of Lambert solves), so it
+        // reruns when the target changes and otherwise every
+        // AUTOPILOT_PREVIEW_INTERVAL seconds, not every frame.
+        void PreviewAutopilot(Vessel vessel)
+        {
+            ITargetable target = FlightGlobals.fetch.VesselTarget;
+            bool targetChanged = !ReferenceEquals(target, autopilotPreviewTarget);
+            if (!targetChanged && Time.time < nextAutopilotPreviewTime)
+                return;
+
+            autopilotPreviewTarget = target;
+            nextAutopilotPreviewTime = Time.time + AUTOPILOT_PREVIEW_INTERVAL;
+
+            AutopilotCheck check = EvaluateAutopilot(vessel, false, out CelestialBody body, out double departure,
+                out double arrival, out double ejection, out double capture);
+            SetLEDState(0x0F, AutopilotPreviewState(check), 0x00);
+        }
+
         MacroStart StartAutopilot()
         {
             Vessel vessel = FlightGlobals.ActiveVessel;
             if (vessel == null)
                 return MacroStart.Failed;
 
-            ITargetable target = FlightGlobals.fetch.VesselTarget;
-            if (target == null)
-            {
-                Debug.Log("[KSPMacropad] AUTOPILOT: no target selected, nothing to plan against");
-                SetLEDState(0x0F, LEDStates.AUTOPILOT_IDLE, 0x00);
-                return MacroStart.Failed;
-            }
-
-            CelestialBody destinationBody = target as CelestialBody;
-            if (destinationBody == null && target is Vessel targetVessel)
-                destinationBody = targetVessel.mainBody;
-
-            if (destinationBody == null)
-            {
-                Debug.Log("[KSPMacropad] AUTOPILOT: target has no resolvable body");
-                SetLEDState(0x0F, LEDStates.AUTOPILOT_IDLE, 0x00);
-                return MacroStart.Failed;
-            }
-
-            CelestialBody originBody = vessel.mainBody;
-
-            if (destinationBody == originBody)
-            {
-                Debug.Log("[KSPMacropad] AUTOPILOT: target is in the same SOI, not an interplanetary case");
-                SetLEDState(0x0F, LEDStates.AUTOPILOT_IDLE, 0x00);
-                return MacroStart.Failed;
-            }
-
-            // MVP only handles "vessel orbiting a planet, transferring to
-            // another planet" - nested-moon-to-elsewhere cases (or a vessel
-            // already heliocentric) aren't covered yet.
-            if (originBody.referenceBody == null || originBody.referenceBody != Planetarium.fetch.Sun)
-            {
-                Debug.Log("[KSPMacropad] AUTOPILOT: origin body's parent isn't the Sun - unsupported case for this MVP");
-                SetLEDState(0x0F, LEDStates.AUTOPILOT_IDLE, 0x00);
-                return MacroStart.Failed;
-            }
-
-            bool foundWindow = FindBestTransferWindow(vessel, originBody, destinationBody,
+            AutopilotCheck check = EvaluateAutopilot(vessel, true, out CelestialBody destinationBody,
                 out double departureUT, out double arrivalUT, out double ejectionDv, out double captureDv);
-
-            if (!foundWindow)
+            if (check != AutopilotCheck.Ready)
             {
-                Debug.Log("[KSPMacropad] AUTOPILOT: no valid transfer window found in the search window");
-                SetLEDState(0x0F, LEDStates.AUTOPILOT_IMPOSSIBLE, 0x00);
-                return MacroStart.Failed;
-            }
-
-            double requiredDv = ejectionDv + captureDv;
-            double availableDv = GetVesselDeltaV(vessel);
-
-            Debug.Log("[KSPMacropad] AUTOPILOT: departureUT=" + departureUT + " arrivalUT=" + arrivalUT +
-                " required dv=" + requiredDv + " (ejection=" + ejectionDv + " capture=" + captureDv +
-                ") available dv=" + availableDv);
-
-            if (availableDv < requiredDv)
-            {
-                SetLEDState(0x0F, LEDStates.AUTOPILOT_IMPOSSIBLE, 0x00);
+                SetLEDState(0x0F, AutopilotPreviewState(check), 0x00);
                 return MacroStart.Failed;
             }
 
@@ -1295,6 +1486,7 @@ namespace KSPMacropad
                         autopilotDestination = null;
                         autopilotPhase = AutopilotPhase.Idle;
                         SetLEDState(0x0F, LEDStates.AUTOPILOT_IDLE, 0x00);
+                        nextAutopilotPreviewTime = 0f;
                         OnMacroFinished(0x0F, true);
                     }
                     break;
@@ -1338,6 +1530,7 @@ namespace KSPMacropad
             autopilotDestination = null;
             autopilotPhase = AutopilotPhase.Idle;
             SetLEDState(0x0F, LEDStates.AUTOPILOT_IDLE, 0x00);
+            nextAutopilotPreviewTime = 0f;
             OnMacroFinished(0x0F, false);
         }
 
