@@ -1971,12 +1971,6 @@
 		(uuid "08457df2-faef-4bf4-a84b-82e4e120d96b")
 	)
 	(junction
-		(at 67.31 68.58)
-		(diameter 0)
-		(color 0 0 0 0)
-		(uuid "0e1f0663-5054-4952-9403-585e28c8d7ec")
-	)
-	(junction
 		(at 67.31 43.18)
 		(diameter 0)
 		(color 0 0 0 0)
@@ -2013,6 +2007,12 @@
 		(uuid "222e66b3-a145-48fc-b4ad-fccc0301ba35")
 	)
 	(junction
+		(at 16.51 68.58)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "2629a221-0001-4ea4-8188-da946bfe27f4")
+	)
+	(junction
 		(at 73.66 185.42)
 		(diameter 0)
 		(color 0 0 0 0)
@@ -2043,12 +2043,6 @@
 		(uuid "4a63af67-315f-4678-96a4-d78f7572ba69")
 	)
 	(junction
-		(at 110.49 20.32)
-		(diameter 0)
-		(color 0 0 0 0)
-		(uuid "4bb4a26a-9892-4fb0-947f-691150984dbb")
-	)
-	(junction
 		(at 142.24 48.26)
 		(diameter 0)
 		(color 0 0 0 0)
@@ -2059,12 +2053,6 @@
 		(diameter 0)
 		(color 0 0 0 0)
 		(uuid "5806ffee-dfde-4628-b800-254f31d0ffec")
-	)
-	(junction
-		(at 16.51 68.58)
-		(diameter 0)
-		(color 0 0 0 0)
-		(uuid "5ad66295-89c1-4055-ad07-6fa365158b3c")
 	)
 	(junction
 		(at 91.44 219.71)
@@ -2091,6 +2079,12 @@
 		(uuid "6001d644-f956-42b2-80af-ce88ebf6e4ba")
 	)
 	(junction
+		(at 67.31 68.58)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "603fa9e8-ede9-4b37-a661-56ee65e222f9")
+	)
+	(junction
 		(at 111.76 162.56)
 		(diameter 0)
 		(color 0 0 0 0)
@@ -2107,6 +2101,12 @@
 		(diameter 0)
 		(color 0 0 0 0)
 		(uuid "6a9ce2ac-0160-4564-8c8e-970a47f503d0")
+	)
+	(junction
+		(at 110.49 50.8)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "6b3dbae5-a806-4bb6-9879-0decc45be16f")
 	)
 	(junction
 		(at 142.24 50.8)
@@ -2215,12 +2215,6 @@
 		(diameter 0)
 		(color 0 0 0 0)
 		(uuid "952003b1-4766-499d-9595-5aeb02d4a428")
-	)
-	(junction
-		(at 110.49 50.8)
-		(diameter 0)
-		(color 0 0 0 0)
-		(uuid "963eff8c-373e-449d-933a-0dd595db19ad")
 	)
 	(junction
 		(at 110.49 38.1)
@@ -2377,6 +2371,12 @@
 		(diameter 0)
 		(color 0 0 0 0)
 		(uuid "eefb480b-cc9a-418d-8529-8834bec95b77")
+	)
+	(junction
+		(at 110.49 20.32)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "f21b1b94-c314-4058-9f4a-798ae42d62ca")
 	)
 	(junction
 		(at 111.76 181.61)
@@ -2667,6 +2667,16 @@
 			(type default)
 		)
 		(uuid "1f70be6b-c313-4abd-96ee-c50482e2377e")
+	)
+	(wire
+		(pts
+			(xy 67.31 68.58) (xy 67.31 76.2)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "1fbcb0cb-aa23-4f55-b7f2-3760598f7ed4")
 	)
 	(wire
 		(pts
@@ -3010,6 +3020,16 @@
 	)
 	(wire
 		(pts
+			(xy 110.49 50.8) (xy 118.11 50.8)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "49cfd7ef-0238-45af-8eb3-de4dfc8361c4")
+	)
+	(wire
+		(pts
 			(xy 130.81 88.9) (xy 186.69 88.9)
 		)
 		(stroke
@@ -3227,6 +3247,16 @@
 			(type default)
 		)
 		(uuid "595f1e26-0577-421e-9606-07b48740375e")
+	)
+	(wire
+		(pts
+			(xy 110.49 20.32) (xy 118.11 20.32)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "59e3f926-cec5-4d3b-9c8b-ce77f41f393e")
 	)
 	(wire
 		(pts
@@ -4447,6 +4477,16 @@
 			(type default)
 		)
 		(uuid "f26119ec-4e47-4eb7-9c58-0486f915ed61")
+	)
+	(wire
+		(pts
+			(xy 16.51 68.58) (xy 16.51 76.2)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "f27c4a09-d4c1-4590-9c53-3c7a7019abac")
 	)
 	(wire
 		(pts
@@ -5802,7 +5842,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "6.8k"
+		(property "Value" "10k"
 			(at 95.25 73.6599 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5838,6 +5878,16 @@
 		(property "Description" "Resistor"
 			(at 92.71 72.39 0)
 			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Tolerance" "1%"
+			(at 92.71 72.39 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -6161,7 +6211,7 @@
 				)
 			)
 		)
-		(property "Value" "6.8k"
+		(property "Value" "16k"
 			(at 114.3 34.29 90)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6196,6 +6246,16 @@
 		(property "Description" "Resistor"
 			(at 114.3 38.1 0)
 			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Tolerance" "1%"
+			(at 114.3 38.1 90)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -6241,7 +6301,7 @@
 				)
 			)
 		)
-		(property "Value" "6.8k"
+		(property "Value" "16k"
 			(at 114.3 59.69 90)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6276,6 +6336,16 @@
 		(property "Description" "Resistor"
 			(at 114.3 63.5 0)
 			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Tolerance" "1%"
+			(at 114.3 63.5 90)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -6564,88 +6634,6 @@
 		)
 	)
 	(symbol
-		(lib_id "Device:R")
-		(at 16.51 72.39 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(fields_autoplaced yes)
-		(uuid "54420766-2be6-4cad-b103-0ab8bc3c9d4a")
-		(property "Reference" "R1"
-			(at 19.05 71.1199 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "22k"
-			(at 19.05 73.6599 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal"
-			(at 14.732 72.39 90)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 16.51 72.39 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Resistor"
-			(at 16.51 72.39 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "2"
-			(uuid "a931fb51-8595-4481-8de0-da1d06f0bcaf")
-		)
-		(pin "1"
-			(uuid "e5790d57-8120-4045-85af-c3322eb51611")
-		)
-		(instances
-			(project "KSPMacroPad"
-				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
-					(reference "R1")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
 		(lib_id "Switch:SW_Push")
 		(at 21.59 55.88 0)
 		(unit 1)
@@ -6889,86 +6877,6 @@
 			(project "KSPMacroPad"
 				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
 					(reference "LED2")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "Device:R")
-		(at 114.3 20.32 90)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(fields_autoplaced yes)
-		(uuid "61a949d4-01de-4432-a585-ece98f08c420")
-		(property "Reference" "R8"
-			(at 114.3 13.97 90)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Value" "22k"
-			(at 114.3 16.51 90)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal"
-			(at 114.3 22.098 90)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 114.3 20.32 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Resistor"
-			(at 114.3 20.32 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "2"
-			(uuid "38271600-e9c5-411a-9882-70e56510e818")
-		)
-		(pin "1"
-			(uuid "e7e086c7-c463-4b66-a442-223fd5a2b5ea")
-		)
-		(instances
-			(project "KSPMacroPad"
-				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
-					(reference "R8")
 					(unit 1)
 				)
 			)
@@ -9394,86 +9302,6 @@
 		)
 	)
 	(symbol
-		(lib_id "Device:R")
-		(at 114.3 50.8 90)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(fields_autoplaced yes)
-		(uuid "c1fcdeaa-c54b-4d08-ad66-bcfeccea8d17")
-		(property "Reference" "R6"
-			(at 114.3 44.45 90)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Value" "22k"
-			(at 114.3 46.99 90)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal"
-			(at 114.3 52.578 90)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 114.3 50.8 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Resistor"
-			(at 114.3 50.8 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "2"
-			(uuid "38271600-e9c5-411a-9882-70e56510e819")
-		)
-		(pin "1"
-			(uuid "e7e086c7-c463-4b66-a442-223fd5a2b5eb")
-		)
-		(instances
-			(project "KSPMacroPad"
-				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
-					(reference "R6")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
 		(lib_id "Device:D")
 		(at 81.28 30.48 180)
 		(unit 1)
@@ -10024,7 +9852,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "6.8k"
+		(property "Value" "10k"
 			(at 44.45 73.6599 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -10060,6 +9888,16 @@
 		(property "Description" "Resistor"
 			(at 41.91 72.39 0)
 			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Tolerance" "1%"
+			(at 41.91 72.39 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -10532,88 +10370,6 @@
 			(project "KSPMacroPad"
 				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
 					(reference "D8")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "Device:R")
-		(at 67.31 72.39 0)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(fields_autoplaced yes)
-		(uuid "e42447a1-5a17-4e30-a126-a94aee31e276")
-		(property "Reference" "R3"
-			(at 69.85 71.1199 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "22k"
-			(at 69.85 73.6599 0)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal"
-			(at 65.532 72.39 90)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 67.31 72.39 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Resistor"
-			(at 67.31 72.39 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "2"
-			(uuid "a931fb51-8595-4481-8de0-da1d06f0bcb1")
-		)
-		(pin "1"
-			(uuid "e5790d57-8120-4045-85af-c3322eb51613")
-		)
-		(instances
-			(project "KSPMacroPad"
-				(path "/c63db32e-eaf1-4272-8738-6b07cc2a38cd"
-					(reference "R3")
 					(unit 1)
 				)
 			)
