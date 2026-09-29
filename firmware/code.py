@@ -7,6 +7,7 @@ import time
 
 import board
 import analogio
+import digitalio
 import busio
 import rotaryio
 import neopixel
@@ -25,12 +26,22 @@ serial = usb_cdc.data
 # Constants
 # ----------------------------------------------------------------------------
 
-# ADC voltage bands used to classify each row/col line (idle / low / high)
-IDLE_MAX = 0.3
-LOW_MIN = 0.7
-LOW_MAX = 1.3
-HIGH_MIN = 1.6
-HIGH_MAX = 2.3
+# Key matrix (see read_key). Each column pin (A2, A3) feeds two column lines:
+# one directly (0 ohm), one through 10k. Each row pin (A0, A1) reads two row
+# lines, one directly and one through 16k, into a 10k pulldown. With a
+# column pin driven high, a pressed key puts one of four voltages on its row
+# pin (1% resistors, 1N4148 drop 0.48-0.65 V, ADC error included):
+#   10k column + 16k row   0.70 - 0.82 V
+#   0R  column + 16k row   0.98 - 1.13 V
+#   10k column + 0R  row   1.28 - 1.45 V
+#   0R  column + 0R  row   2.62 - 2.85 V
+MATRIX_IDLE_MAX = 0.40
+MATRIX_BANDS = (   # (upper edge in volts, column line, row line); line 0 = direct, 1 = through a resistor
+    (0.90, 1, 1),
+    (1.205, 0, 1),
+    (2.00, 1, 0),
+    (3.40, 0, 0),
+)
 
 DEBOUNCE_COUNT = 4      # consecutive stable reads required before a key registers
 COUNTS_PER_DETENT = 4   # raw encoder counts per physical detent click
@@ -102,7 +113,7 @@ HEARTBEAT_TIMEOUT = 3.0   # seconds since last heartbeat before we call it disco
 # ----------------------------------------------------------------------------
 
 row_pins = [analogio.AnalogIn(board.A0), analogio.AnalogIn(board.A1)]
-col_pins = [analogio.AnalogIn(board.A2), analogio.AnalogIn(board.A3)]
+col_drives = [digitalio.DigitalInOut(board.A2), digitalio.DigitalInOut(board.A3)]   # high-Z until scanned
 
 left_enc = rotaryio.IncrementalEncoder(board.D10, board.D9)
 right_enc = rotaryio.IncrementalEncoder(board.D7, board.D8)
@@ -110,7 +121,7 @@ right_enc = rotaryio.IncrementalEncoder(board.D7, board.D8)
 pixels = neopixel.NeoPixel(board.D6, NUM_LEDS, auto_write=False)
 
 displayio.release_displays()
-_i2c = busio.I2C(board.D1, board.D0)   # SCL, SDA
+_i2c = busio.I2C(board.D5, board.D4)   # SCL, SDA - the PCB routes the OLED to D5/D4 (D0/D1 are A0/A1, the matrix)
 _display_bus = displayio.I2CDisplay(_i2c, device_address=0x3C)
 display = adafruit_displayio_ssd1306.SSD1306(_display_bus, width=OLED_WIDTH, height=OLED_HEIGHT)
 
@@ -157,13 +168,8 @@ _in_buf = bytearray()
 # ----------------------------------------------------------------------------
 # Key matrix mapping
 # ----------------------------------------------------------------------------
-# KEY_MAP[row][col] -> key_id byte sent to the mod
-KEY_MAP = [
-    [0x00, 0x04, 0x08, 0x0C],
-    [0x01, 0x05, 0x09, 0x0D],
-    [0x02, 0x06, 0x0A, 0x0E],
-    [0x03, 0x07, 0x0B, 0x0F],
-]
+# Key ids run left to right, top to bottom: the top row (nearest the OLED) is
+# 0x00-0x03, the bottom row 0x0C-0x0F. read_key returns row * 4 + col.
 
 
 # ----------------------------------------------------------------------------
@@ -171,13 +177,15 @@ KEY_MAP = [
 # ----------------------------------------------------------------------------
 # Physical NeoPixel chain order -> key_id it lights up for.
 # None = underglow pixel (not tied to a specific key).
+# The chain snakes across the rows: top row left to right, second row right
+# to left, and so on, with the corner underglow LEDs at positions 0, 5, 18, 19.
 LED_CHAIN_TO_KEY = [
     None,
-    0x00, 0x04, 0x08, 0x0C,
+    0x00, 0x01, 0x02, 0x03,
     None,
-    0x0D, 0x09, 0x05, 0x01,
-    0x0E, 0x0A, 0x06, 0x02,
-    0x03, 0x07, 0x0B, 0x0F,
+    0x07, 0x06, 0x05, 0x04,
+    0x08, 0x09, 0x0A, 0x0B,
+    0x0F, 0x0E, 0x0D, 0x0C,
     None, None,
 ]
 
@@ -285,32 +293,34 @@ def read_voltage(pin):
     return pin.value / 65535 * 3.3
 
 
-def classify(voltage):
-    """Map a raw voltage reading to an idle/low/high band, or None if idle."""
-    if voltage < IDLE_MAX:
+def decode_matrix(col_pin, row_pin, voltage):
+    """(row, col) of the key closed between the driven col_pin and row_pin,
+    from that row pin's voltage, or None if nothing is pressed there."""
+    if voltage < MATRIX_IDLE_MAX:
         return None
-    if LOW_MIN <= voltage <= LOW_MAX:
-        return 0
-    if HIGH_MIN <= voltage <= HIGH_MAX:
-        return 1
-    return None
-
-
-def find_index(pins):
-    """Return the (line_index * 2 + band) for whichever pin is active, else None."""
-    for pin_idx, pin in enumerate(pins):
-        level = classify(read_voltage(pin))
-        if level is not None:
-            return pin_idx * 2 + level
+    for edge, col_line, row_line in MATRIX_BANDS:
+        if voltage < edge:
+            return row_pin * 2 + row_line, col_pin * 2 + col_line
     return None
 
 
 def read_key():
-    row = find_index(row_pins)
-    col = find_index(col_pins)
-    if row is None or col is None:
+    """Drive each column pin high in turn and read both row pins. The matrix
+    has no other voltage source, so an undriven column pin reads nothing.
+    Single keys only - two keys on the same row pin under the same driven
+    column add their currents and read as a different key."""
+    found = None
+    for c, drive in enumerate(col_drives):
+        drive.switch_to_output(value=True)
+        for r, pin in enumerate(row_pins):
+            hit = decode_matrix(c, r, read_voltage(pin))
+            if hit is not None and found is None:
+                found = hit
+        drive.switch_to_input()
+    if found is None:
         return None
-    return KEY_MAP[row][col]
+    row, col = found
+    return row * 4 + col
 
 
 def poll_key():
