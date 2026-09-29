@@ -20,6 +20,7 @@ import adafruit_displayio_ssd1306
 from led_states import LEDStates
 
 serial = usb_cdc.data
+serial.write_timeout = 0.01   # default is None (block forever), which freezes the pad if nothing reads the port
 
 
 # ----------------------------------------------------------------------------
@@ -107,6 +108,12 @@ MACRO_TAGS = {
 
 HEARTBEAT_TIMEOUT = 3.0   # seconds since last heartbeat before we call it disconnected
 
+# Pad -> mod hello, sent periodically so the mod can tell this data port
+# apart from the REPL console port (and anything else plugged in).
+PAD_HELLO_TYPE = 0x03
+PAD_HELLO_INTERVAL = 1.0
+PAD_RESYNC_TYPE = 0x04   # "resend everything" - sent when the heartbeat comes back after a lapse
+
 
 # ----------------------------------------------------------------------------
 # Hardware setup
@@ -163,6 +170,7 @@ _left_last = left_enc.position
 _right_last = right_enc.position
 
 _in_buf = bytearray()
+_last_hello = 0.0
 
 
 # ----------------------------------------------------------------------------
@@ -384,17 +392,30 @@ def poll_encoders():
 # ----------------------------------------------------------------------------
 # Packet format: [0x44, msg_type, id, data_hi, data_lo, 0x77]
 
+def send_packet(packet):
+    """Write only when a host has the port open (DTR set); otherwise the
+    bytes have nowhere to go."""
+    if serial.connected:
+        serial.write(packet)
+
+
 def send_key_packet(key_id):
-    packet = bytes([0x44, 0x01, key_id, 0x00, 0x01, 0x77])
-    serial.write(packet)
+    send_packet(bytes([0x44, 0x01, key_id, 0x00, 0x01, 0x77]))
+
+
+def send_hello():
+    send_packet(bytes([0x44, PAD_HELLO_TYPE, 0x00, 0x00, 0x00, 0x77]))
+
+
+def send_resync():
+    send_packet(bytes([0x44, PAD_RESYNC_TYPE, 0x00, 0x00, 0x00, 0x77]))
 
 
 def send_encoder_packet(encoder_id, steps):
     steps = max(-32768, min(32767, steps))
     hi = (steps >> 8) & 0xFF
     lo = steps & 0xFF
-    packet = bytes([0x44, 0x02, encoder_id, hi, lo, 0x77])
-    serial.write(packet)
+    send_packet(bytes([0x44, 0x02, encoder_id, hi, lo, 0x77]))
 
 
 # ----------------------------------------------------------------------------
@@ -633,6 +654,13 @@ while True:
             active_macro = None
             next_macro = None
             queued_count = 0
+        else:
+            send_resync()
         update_display()
+
+    now = time.monotonic()
+    if now - _last_hello >= PAD_HELLO_INTERVAL:
+        _last_hello = now
+        send_hello()
 
     time.sleep(LOOP_INTERVAL)
