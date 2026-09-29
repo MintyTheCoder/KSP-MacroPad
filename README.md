@@ -6,7 +6,7 @@ A custom macropad built specifically for Kerbal Space Program, developed as part
 
 The key matrix uses an ADC-based resistor ladder instead of a traditional GPIO matrix, a custom solution to a pin shortage on the RP2040.
 
-![Front of the PCB](design/images/KSPMacroPad_front.png)
+![Front of the PCB](images/KSPMacroPad_front.png)
 
 ## Hardware
 - Seeed XIAO RP2040
@@ -14,11 +14,11 @@ The key matrix uses an ADC-based resistor ladder instead of a traditional GPIO m
 - 2 EC11 rotary encoders (D7–D10)
 - 20 SK6812MINI-E NeoPixels: 16 per-key + 4 underglow (D6)
 - SSD1306 128x32 OLED over I2C (D0/D1)
-- 3D-printed case (OpenSCAD source + STLs in [design/](design/))
+- 3D-printed case (OpenSCAD source + STLs in [CAD/](CAD/))
 
 | | |
 |---|---|
-| ![Schematic](design/images/schematic.png) | ![PCB routing](design/images/PCB_routing.png) |
+| ![Schematic](images/schematic.png) | ![PCB routing](images/PCB_routing.png) |
 
 ## Key Layout
 
@@ -62,12 +62,12 @@ LED state values are defined in `led_states.py` (firmware) and `LEDStates.cs` (m
    - `neopixel`
    - `adafruit_display_text`
    - `adafruit_displayio_ssd1306`
-3. Copy `boot.py`, `code.py`, and `led_states.py` from [firmware/](firmware/) to the root of `CIRCUITPY`.
+3. Copy `boot.py`, `code.py`, and `led_states.py` from [Firmware/](Firmware/) to the root of `CIRCUITPY`.
 4. Power-cycle the board (not just a soft reload) so `boot.py` can enable the USB data port.
 
 ## Repository Layout
-- [design/](design/) — KiCad PCB + schematic, OpenSCAD case source, case STLs (completed)
-- [firmware/](firmware/) — CircuitPython firmware, v0.2.1: key scanning, encoders, LEDs, OLED, and serial protocol working
+- [PCB/](PCB/) — KiCad PCB + schematic, OpenSCAD case source, case STLs (completed)
+- [Firmware/](Firmware/) — CircuitPython firmware, v0.2.1: key scanning, encoders, LEDs, OLED, and serial protocol working
 
 ## Branches
 - `mod` — KSP 1.12.5 C# plugin (WIP): serial and packet-handling skeleton, macros not yet implemented

@@ -1,3 +1,5 @@
 *.zip
 *.lck
 *.kicad_prl
+!production/gerbers.zip
+mod/KSPMacropad/packages/
