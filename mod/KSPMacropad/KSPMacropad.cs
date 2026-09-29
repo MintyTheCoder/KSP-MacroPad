@@ -11,9 +11,21 @@ namespace KSPMacropad
     [KSPAddon(KSPAddon.Startup.Flight, false)]
     public class KSPMacropad : MonoBehaviour
     {
-        SerialPort serialPort = new SerialPort("COM3", 115200);
+        // Serial link to the pad. The port isn't hardcoded: SerialThread finds
+        // it by listening for the pad's hello packet (see PadHelloFrame), or
+        // uses the port named in KSPMacropad.cfg next to the DLL. It
+        // reconnects on its own if the pad is unplugged and plugged back in.
+        private SerialPort serialPort;
+        private readonly object portLock = new object();
+        private Thread serialThread;
+        private volatile bool resyncPad = false; // set by the serial thread on connect, handled in Update
         private Queue<byte[]> messageQueue = new Queue<byte[]>();
         private readonly object queueLock = new object();
+        private const int MAX_PACKETS_PER_FRAME = 64;
+        private const int SERIAL_IDLE_SLEEP_MS = 5;       // read loop sleep when nothing is waiting
+        private const int SERIAL_RETRY_MS = 2000;         // wait between connection attempts
+        private const int PORT_PROBE_MS = 1500;           // how long to listen on a port for the pad's hello
+        private const int SERIAL_BAUD = 115200;           // ignored by USB CDC, but SerialPort wants one
 
         // Every key that actually has LED states defined (see LEDStates.cs /
         // STATE_COLORS on the firmware side). Excludes 0x0B (PRECISION INPUT
@@ -39,7 +51,7 @@ namespace KSPMacropad
         private byte[] ledStates = new byte[TrackedKeyIds.Length + 1];
         private byte[] ledData = new byte[TrackedKeyIds.Length + 1];
 
-        private bool running = false;
+        private volatile bool running = false;
 
         // Reserved inbound-to-pad IDs outside the key (0x00-0x0F) / underglow
         // (0x10-0x13) ranges - same 5-byte frame as UpdateLED, just new
@@ -168,130 +180,33 @@ namespace KSPMacropad
         void Start()
         {
             Debug.Log("[KSPMacropad] KSP Macropad loaded.");
-            Thread serialThread = new Thread(ReadSerialLoop);
-
-            serialPort.BaudRate = 115200;
-            serialPort.Open();
-
-            serialThread.IsBackground = true;
-            running = true;
-            serialThread.Start();
-
             InitializeLEDs();
+
+            running = true;
+            serialThread = new Thread(SerialThread) { IsBackground = true, Name = "KSPMacropad serial" };
+            serialThread.Start();
         }
 
-        //packet structure: [0x44][type: 1 byte][id: 1 byte][value: 2 bytes][0x77]
         void Update()
         {
-            byte[] msg = null;
-            lock (queueLock)
+            if (resyncPad)
             {
-                if (messageQueue.Count > 0)
-                    msg = messageQueue.Dequeue();
+                resyncPad = false;
+                ResendAllState();
             }
 
-            if (msg != null)
+            // Everything that arrived since the last frame, not just one
+            // packet - spinning an encoder can produce several per frame.
+            for (int handled = 0; handled < MAX_PACKETS_PER_FRAME; handled++)
             {
-                switch (msg[1])
+                byte[] msg;
+                lock (queueLock)
                 {
-                    case 0x01:
-                        Debug.Log("[KSPMacropad] Trigger type: Key");
-                        //add the 16 ids for the keys and what to do with them
-                        switch (msg[2])
-                        {
-                            case 0x00:
-                                Debug.Log("[KSPMacropad] KEY PRESSED: LAUNCH SEQUENCE");
-                                DoLaunchSequence();
-                                break;
-                            case 0x01:
-                                Debug.Log("[KSPMacropad] KEY PRESSED: AUTO GRAVITY TURN");
-                                RequestFlyingMacro(0x01);
-                                break;
-
-                            case 0x02:
-                                Debug.Log("[KSPMacropad] KEY PRESSED: CIRCULARIZE");
-                                RequestFlyingMacro(0x02);
-                                break;
-
-                            case 0x03:
-                                Debug.Log("[KSPMacropad] KEY PRESSED: TIME ACCELERATION TO NXT BURN");
-                                DoTimeAccelToNextEvent();
-                                break;
-
-                            case 0x04:
-                                Debug.Log("[KSPMacropad] KEY PRESSED: INTERCEPT CALCULATION");
-                                RequestFlyingMacro(0x04);
-                                break;
-
-                            case 0x05:
-                                Debug.Log("[KSPMacropad] KEY PRESSED: ORBIT SYNC");
-                                RequestFlyingMacro(0x05);
-                                break;
-
-                            case 0x06:
-                                Debug.Log("[KSPMacropad] KEY PRESSED: RENDEZVOUS PREPARATION");
-                                DoRendezvousPrep();
-                                break;
-
-                            case 0x07:
-                                Debug.Log("[KSPMacropad] KEY PRESSED: DEORBIT BURN");
-                                RequestFlyingMacro(0x07);
-                                break;
-
-                            case 0x08:
-                                Debug.Log("[KSPMacropad] KEY PRESSED: DOCKING PREP");
-                                DoDockingPrep();
-                                break;
-
-                            case 0x09:
-                                Debug.Log("[KSPMacropad] KEY PRESSED: LANDING PREP");
-                                DoLandingPrep();
-                                break;
-
-                            case 0x0A:
-                                Debug.Log("[KSPMacropad] KEY PRESSED: SUICIDE BURN ARM");
-                                RequestFlyingMacro(0x0A);
-                                break;
-
-                            case 0x0B:
-                                Debug.Log("[KSPMacropad] KEY PRESSED: PRECISION INPUT TOGGLE");
-                                OnPrecisionInputKey();
-                                break;
-
-                            case 0x0C:
-                                Debug.Log("[KSPMacropad] KEY PRESSED: TRANSMIT SCIENCE");
-                                DoTransmitScience();
-                                break;
-
-                            case 0x0D:
-                                Debug.Log("[KSPMacropad] KEY PRESSED: RESOURCE MONITOR MODE");
-                                DoResourceMonitorToggle();
-                                break;
-
-                            case 0x0E:
-                                Debug.Log("[KSPMacropad] KEY PRESSED: AUXILARY MODE TOGGLE");
-                                OnAuxModeKey();
-                                break;
-
-                            case 0x0F:
-                                Debug.Log("[KSPMacropad] KEY PRESSED: AUTOPILOT");
-                                RequestFlyingMacro(0x0F);
-                                break;
-                        }
-
+                    if (messageQueue.Count == 0)
                         break;
-
-                    case 0x02:
-                        // id = (mode << 4) | encoder, encoder 1 = left, 2 = right
-                        int encoderModeNibble = msg[2] >> 4;
-                        int encoderSide = msg[2] & 0x0F;
-                        short steps = (short)((msg[3] << 8) | msg[4]);
-                        Debug.Log("[KSPMacropad] TURNED ENCODER(mode " + encoderModeNibble + "): " +
-                            (encoderSide == 1 ? "LEFT" : "RIGHT") + " " + steps);
-                        HandleEncoder(encoderModeNibble, encoderSide, steps);
-                        break;
+                    msg = messageQueue.Dequeue();
                 }
-
+                HandlePacket(msg);
             }
 
             SendHeartbeat();
@@ -306,15 +221,126 @@ namespace KSPMacropad
             TickSuicideBurn();
         }
 
+        // Inbound packet: [0x44][type][id][value_hi][value_lo][0x77]
+        void HandlePacket(byte[] msg)
+        {
+            switch (msg[1])
+            {
+                case 0x03:
+                    break; // pad hello - only used to find the right port
+                case 0x04:
+                    ResendAllState(); // pad lost our heartbeat and blanked itself
+                    break;
+                case 0x01:
+                    Debug.Log("[KSPMacropad] Trigger type: Key");
+                    //add the 16 ids for the keys and what to do with them
+                    switch (msg[2])
+                    {
+                        case 0x00:
+                            Debug.Log("[KSPMacropad] KEY PRESSED: LAUNCH SEQUENCE");
+                            DoLaunchSequence();
+                            break;
+                        case 0x01:
+                            Debug.Log("[KSPMacropad] KEY PRESSED: AUTO GRAVITY TURN");
+                            RequestFlyingMacro(0x01);
+                            break;
+
+                        case 0x02:
+                            Debug.Log("[KSPMacropad] KEY PRESSED: CIRCULARIZE");
+                            RequestFlyingMacro(0x02);
+                            break;
+
+                        case 0x03:
+                            Debug.Log("[KSPMacropad] KEY PRESSED: TIME ACCELERATION TO NXT BURN");
+                            DoTimeAccelToNextEvent();
+                            break;
+
+                        case 0x04:
+                            Debug.Log("[KSPMacropad] KEY PRESSED: INTERCEPT CALCULATION");
+                            RequestFlyingMacro(0x04);
+                            break;
+
+                        case 0x05:
+                            Debug.Log("[KSPMacropad] KEY PRESSED: ORBIT SYNC");
+                            RequestFlyingMacro(0x05);
+                            break;
+
+                        case 0x06:
+                            Debug.Log("[KSPMacropad] KEY PRESSED: RENDEZVOUS PREPARATION");
+                            DoRendezvousPrep();
+                            break;
+
+                        case 0x07:
+                            Debug.Log("[KSPMacropad] KEY PRESSED: DEORBIT BURN");
+                            RequestFlyingMacro(0x07);
+                            break;
+
+                        case 0x08:
+                            Debug.Log("[KSPMacropad] KEY PRESSED: DOCKING PREP");
+                            DoDockingPrep();
+                            break;
+
+                        case 0x09:
+                            Debug.Log("[KSPMacropad] KEY PRESSED: LANDING PREP");
+                            DoLandingPrep();
+                            break;
+
+                        case 0x0A:
+                            Debug.Log("[KSPMacropad] KEY PRESSED: SUICIDE BURN ARM");
+                            RequestFlyingMacro(0x0A);
+                            break;
+
+                        case 0x0B:
+                            Debug.Log("[KSPMacropad] KEY PRESSED: PRECISION INPUT TOGGLE");
+                            OnPrecisionInputKey();
+                            break;
+
+                        case 0x0C:
+                            Debug.Log("[KSPMacropad] KEY PRESSED: TRANSMIT SCIENCE");
+                            DoTransmitScience();
+                            break;
+
+                        case 0x0D:
+                            Debug.Log("[KSPMacropad] KEY PRESSED: RESOURCE MONITOR MODE");
+                            DoResourceMonitorToggle();
+                            break;
+
+                        case 0x0E:
+                            Debug.Log("[KSPMacropad] KEY PRESSED: AUXILARY MODE TOGGLE");
+                            OnAuxModeKey();
+                            break;
+
+                        case 0x0F:
+                            Debug.Log("[KSPMacropad] KEY PRESSED: AUTOPILOT");
+                            RequestFlyingMacro(0x0F);
+                            break;
+                    }
+
+                    break;
+
+                case 0x02:
+                    // id = (mode << 4) | encoder, encoder 1 = left, 2 = right
+                    int encoderModeNibble = msg[2] >> 4;
+                    int encoderSide = msg[2] & 0x0F;
+                    short steps = (short)((msg[3] << 8) | msg[4]);
+                    Debug.Log("[KSPMacropad] TURNED ENCODER(mode " + encoderModeNibble + "): " +
+                        (encoderSide == 1 ? "LEFT" : "RIGHT") + " " + steps);
+                    HandleEncoder(encoderModeNibble, encoderSide, steps);
+                    break;
+            }
+        }
+
         // Sent on a fixed interval regardless of state change (the one
         // exception to the "only send on diff" rule) - lets the pad show
         // a real CONN/NO CONN indicator instead of guessing.
         void SendHeartbeat()
         {
-            if (Time.time - lastHeartbeatTime < HEARTBEAT_INTERVAL)
+            // Unscaled: Time.time stops while the game is paused, which
+            // would make the pad show NO CONN during every pause.
+            if (Time.unscaledTime - lastHeartbeatTime < HEARTBEAT_INTERVAL)
                 return;
 
-            lastHeartbeatTime = Time.time;
+            lastHeartbeatTime = Time.unscaledTime;
             UpdateLED(HEARTBEAT_ID, 0x00, 0x00);
         }
 
@@ -369,57 +395,236 @@ namespace KSPMacropad
             }
         }
 
-        void ReadSerialLoop()
+        // Background thread: connect, read, and reconnect. Never touches the
+        // KSP API (not thread-safe) - it only fills messageQueue and sets
+        // resyncPad for Update() to act on.
+        void SerialThread()
         {
+            byte[] chunk = new byte[256];
+            List<byte> pending = new List<byte>();
+
             while (running)
             {
-                if (serialPort.BytesToRead > 0)
+                SerialPort port;
+                lock (portLock) port = serialPort;
+
+                if (port == null)
                 {
-                    byte[] buffer = new byte[6];
-
-                    serialPort.Read(buffer, 0, 6);
-
-                    if (buffer[0] != 0x44 || buffer[5] != 0x77)
+                    port = ConnectToPad();
+                    if (port == null)
                     {
-                        continue; // Invalid message, skip processing
+                        SleepWhileRunning(SERIAL_RETRY_MS);
+                        continue;
                     }
-
-                    lock (queueLock)
-                    {
-                        messageQueue.Enqueue(buffer);
-                    }
-
+                    lock (portLock) serialPort = port;
+                    pending.Clear();
+                    resyncPad = true;
+                    Debug.Log("[KSPMacropad] Pad connected on " + port.PortName);
                 }
 
+                try
+                {
+                    int waiting = port.BytesToRead;
+                    if (waiting == 0)
+                    {
+                        Thread.Sleep(SERIAL_IDLE_SLEEP_MS);
+                        continue;
+                    }
+
+                    int n = port.Read(chunk, 0, Math.Min(waiting, chunk.Length));
+                    for (int i = 0; i < n; i++)
+                        pending.Add(chunk[i]);
+
+                    foreach (byte[] frame in PacketFramer.Extract(pending))
+                    {
+                        lock (queueLock)
+                            messageQueue.Enqueue(frame);
+                    }
+                }
+                catch (Exception e)
+                {
+                    Debug.Log("[KSPMacropad] Pad disconnected (" + e.GetType().Name + ": " + e.Message + ")");
+                    DisconnectPad();
+                }
             }
+
+            DisconnectPad();
+        }
+
+        // Tries the port from KSPMacropad.cfg first, then every serial port
+        // on the system. A port only counts if a valid pad hello arrives on
+        // it within PORT_PROBE_MS - the pad also exposes a REPL console port,
+        // and other devices may be plugged in.
+        SerialPort ConnectToPad()
+        {
+            List<string> candidates = new List<string>();
+            string configured = ReadConfiguredPort();
+            if (!string.IsNullOrEmpty(configured))
+                candidates.Add(configured);
+
+            try
+            {
+                foreach (string name in SerialPort.GetPortNames())
+                    if (!candidates.Contains(name))
+                        candidates.Add(name);
+            }
+            catch (Exception e)
+            {
+                Debug.Log("[KSPMacropad] Couldn't list serial ports: " + e.Message);
+            }
+
+            foreach (string name in candidates)
+            {
+                if (!running)
+                    return null;
+
+                SerialPort port = null;
+                try
+                {
+                    port = new SerialPort(name, SERIAL_BAUD) { DtrEnable = true, RtsEnable = true, ReadTimeout = 100, WriteTimeout = 100 };
+                    port.Open();
+                    if (HearsPadHello(port))
+                        return port;
+                }
+                catch (Exception)
+                {
+                    // busy, missing, or not a serial device - try the next one
+                }
+
+                try { if (port != null && port.IsOpen) port.Close(); } catch (Exception) { }
+            }
+
+            return null;
+        }
+
+        bool HearsPadHello(SerialPort port)
+        {
+            List<byte> pending = new List<byte>();
+            byte[] chunk = new byte[64];
+            DateTime deadline = DateTime.UtcNow.AddMilliseconds(PORT_PROBE_MS);
+
+            while (running && DateTime.UtcNow < deadline)
+            {
+                int waiting = port.BytesToRead;
+                if (waiting == 0)
+                {
+                    Thread.Sleep(SERIAL_IDLE_SLEEP_MS);
+                    continue;
+                }
+
+                int n = port.Read(chunk, 0, Math.Min(waiting, chunk.Length));
+                for (int i = 0; i < n; i++)
+                    pending.Add(chunk[i]);
+
+                foreach (byte[] frame in PacketFramer.Extract(pending))
+                {
+                    if (PacketFramer.IsHello(frame))
+                        return true;
+                }
+            }
+
+            return false;
+        }
+
+        // Optional override: a line like "port = COM5" in KSPMacropad.cfg,
+        // in the same folder as this DLL.
+        static string ReadConfiguredPort()
+        {
+            try
+            {
+                string dir = System.IO.Path.GetDirectoryName(typeof(KSPMacropad).Assembly.Location);
+                string path = System.IO.Path.Combine(dir, "KSPMacropad.cfg");
+                if (!System.IO.File.Exists(path))
+                    return null;
+
+                foreach (string raw in System.IO.File.ReadAllLines(path))
+                {
+                    string line = raw.Trim();
+                    int eq = line.IndexOf('=');
+                    if (eq > 0 && line.Substring(0, eq).Trim().Equals("port", StringComparison.OrdinalIgnoreCase))
+                        return line.Substring(eq + 1).Trim();
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.Log("[KSPMacropad] Couldn't read KSPMacropad.cfg: " + e.Message);
+            }
+            return null;
+        }
+
+        void DisconnectPad()
+        {
+            SerialPort port;
+            lock (portLock)
+            {
+                port = serialPort;
+                serialPort = null;
+            }
+
+            try { if (port != null && port.IsOpen) port.Close(); } catch (Exception) { }
+        }
+
+        void SleepWhileRunning(int ms)
+        {
+            for (int waited = 0; running && waited < ms; waited += 100)
+                Thread.Sleep(100);
         }
 
         void OnDestroy()
         {
-            if (serialPort != null && serialPort.IsOpen)
+            running = false;
+            if (serialThread != null && serialThread.IsAlive)
+                serialThread.Join(500);
+            DisconnectPad();
+        }
+
+        // After a (re)connect the pad has lost all its state, so send
+        // everything again instead of waiting for each value to change.
+        void ResendAllState()
+        {
+            foreach (byte keyId in TrackedKeyIds)
             {
-                running = false;
-                serialPort.Close();
+                int idx = KeyIdToStateIndex[keyId];
+                UpdateLED(keyId, ledStates[idx], ledData[idx]);
             }
+            int ug = TrackedKeyIds.Length;
+            UpdateUnderglow(ledStates[ug], ledData[ug]);
+
+            lastSentThrottle = -1;
+            lastSentWarp = -1;
+            lastSentActiveMacro = -1;
+            lastSentNextMacro = -1;
+            lastSentQueueLength = -1;
+            lastHeartbeatTime = -HEARTBEAT_INTERVAL;
         }
 
         // Shared 5-byte outbound frame writer: [0x77][id][state][data][0x44].
         // Used for LED updates as well as HEARTBEAT/telemetry - the name is
-        // legacy from when it only sent LED colors.
+        // legacy from when it only sent LED colors. A failed write drops the
+        // connection so the serial thread reconnects.
         void UpdateLED(byte led_id, byte state, byte data)
         {
-            if (serialPort != null && serialPort.IsOpen)
+            byte[] buffer = { 0x77, led_id, state, data, 0x44 };
+            bool failed = false;
+
+            lock (portLock)
             {
-                byte[] buffer = new byte[5];
+                if (serialPort == null || !serialPort.IsOpen)
+                    return;
 
-                buffer[0] = 0x77;
-                buffer[1] = led_id;
-                buffer[2] = state;
-                buffer[3] = data;
-                buffer[4] = 0x44;
-
-                serialPort.Write(buffer, 0, 5);
+                try
+                {
+                    serialPort.Write(buffer, 0, buffer.Length);
+                }
+                catch (Exception e)
+                {
+                    Debug.Log("[KSPMacropad] Write to pad failed: " + e.Message);
+                    failed = true;
+                }
             }
+
+            if (failed)
+                DisconnectPad();
         }
 
         void UpdateUnderglow(byte state, byte data)
@@ -2382,6 +2587,51 @@ namespace KSPMacropad
             return vessel.VesselDeltaV.TotalDeltaVActual;
         }
 
+    }
+
+    // Splits the pad's byte stream into 6-byte frames
+    // [0x44][type][id][value_hi][value_lo][0x77]. Resyncs one byte at a
+    // time on anything malformed, so a dropped or corrupted byte costs one
+    // packet instead of misaligning everything after it. Handles frames
+    // split across reads. Pure - no KSP or serial access - so it's tested
+    // outside the game.
+    internal static class PacketFramer
+    {
+        public const byte START = 0x44;
+        public const byte END = 0x77;
+        public const int LENGTH = 6;
+        public const byte HELLO_TYPE = 0x03;
+
+        // Removes every complete frame from the front of `pending` and
+        // returns them; leaves any trailing partial frame in place.
+        public static List<byte[]> Extract(List<byte> pending)
+        {
+            List<byte[]> frames = new List<byte[]>();
+            int i = 0;
+            while (pending.Count - i >= LENGTH)
+            {
+                if (pending[i] != START || pending[i + LENGTH - 1] != END)
+                {
+                    i++;
+                    continue;
+                }
+                byte[] frame = new byte[LENGTH];
+                for (int k = 0; k < LENGTH; k++)
+                    frame[k] = pending[i + k];
+                frames.Add(frame);
+                i += LENGTH;
+            }
+            // keep a possible start of the next frame; drop bytes that can't start one
+            while (i < pending.Count && pending[i] != START)
+                i++;
+            pending.RemoveRange(0, i);
+            return frames;
+        }
+
+        public static bool IsHello(byte[] frame)
+        {
+            return frame.Length == LENGTH && frame[0] == START && frame[1] == HELLO_TYPE && frame[LENGTH - 1] == END;
+        }
     }
 
     // Pure orbital-mechanics math with no KSP state access, so it can be
