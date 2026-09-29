@@ -1,0 +1,41 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "C:\\Users\\monty\\source\\repos\\KSPMacropad\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{16F5DB26-A7AD-4613-8655-7213E32E9C68}|KSPMacropad.csproj|c:\\users\\monty\\source\\repos\\kspmacropad\\kspmacropad.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{16F5DB26-A7AD-4613-8655-7213E32E9C68}|KSPMacropad.csproj|solutionrelative:kspmacropad.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 0,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "KSPMacropad.cs",
+              "DocumentMoniker": "C:\\Users\\monty\\source\\repos\\KSPMacropad\\KSPMacropad.cs",
+              "RelativeDocumentMoniker": "KSPMacropad.cs",
+              "ToolTip": "C:\\Users\\monty\\source\\repos\\KSPMacropad\\KSPMacropad.cs",
+              "RelativeToolTip": "KSPMacropad.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAB4AAAABAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-07-05T05:49:22.554Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{cce594b6-0c39-4442-ba28-10c64ac7e89f}"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
