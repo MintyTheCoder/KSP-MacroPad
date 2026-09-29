@@ -73,6 +73,10 @@ namespace KSPMacropad
         private int lastSentNextMacro = -1;
         private int lastSentQueueLength = -1;
 
+        // Other mods that change how some macros behave (see DetectOtherMods).
+        private bool mechJebLoaded, principiaLoaded, farLoaded, kerbalismLoaded;
+        private bool allowWithMechJeb = false;   // KSPMacropad.cfg: "allow_with_mechjeb = true"
+
         // Continuous LED-state bookkeeping for the one-shot macros (see CheckLEDStates).
         private double timeAccelTargetUT;
         private float timeAccelStartTime;
@@ -207,6 +211,7 @@ namespace KSPMacropad
         void Start()
         {
             Debug.Log("[KSPMacropad] KSP Macropad loaded.");
+            DetectOtherMods();
             InitializeLEDs();
 
             running = true;
@@ -553,9 +558,14 @@ namespace KSPMacropad
             return false;
         }
 
-        // Optional override: a line like "port = COM5" in KSPMacropad.cfg,
-        // in the same folder as this DLL.
         static string ReadConfiguredPort()
+        {
+            return ReadConfigValue("port");
+        }
+
+        // KSPMacropad.cfg, next to this DLL, holds optional "key = value"
+        // lines: "port = COM5", "allow_with_mechjeb = true".
+        static string ReadConfigValue(string key)
         {
             try
             {
@@ -568,7 +578,7 @@ namespace KSPMacropad
                 {
                     string line = raw.Trim();
                     int eq = line.IndexOf('=');
-                    if (eq > 0 && line.Substring(0, eq).Trim().Equals("port", StringComparison.OrdinalIgnoreCase))
+                    if (eq > 0 && line.Substring(0, eq).Trim().Equals(key, StringComparison.OrdinalIgnoreCase))
                         return line.Substring(eq + 1).Trim();
                 }
             }
@@ -961,6 +971,9 @@ namespace KSPMacropad
             if (vessel == null)
                 return;
 
+            if (BlockedByMechJeb(0x03, LEDStates.TIMEACCEL_UNAVAILABLE, "TIME ACCEL"))
+                return;
+
             double currentUT = Planetarium.GetUniversalTime();
             double? nextEventUT = null;
 
@@ -1185,6 +1198,15 @@ namespace KSPMacropad
             if (vessel == null)
                 return;
 
+            if (kerbalismLoaded)
+            {
+                // Kerbalism replaces stock science transmission and sends
+                // data on its own; stock transmitters don't behave the same.
+                Debug.Log("[KSPMacropad] TRANSMIT SCIENCE: Kerbalism is installed and handles transmission itself");
+                SetLEDState(0x0C, LEDStates.SCIENCE_UNAVAILABLE, 0x00);
+                return;
+            }
+
             IScienceDataTransmitter transmitter = ScienceUtil.GetBestTransmitter(vessel);
             if (transmitter == null)
             {
@@ -1269,7 +1291,7 @@ namespace KSPMacropad
         //     velocity vectors read from Orbit methods share one frame and
         //     can be combined directly. Documented for the class as a whole,
         //     not per-method - recheck once this runs against KSP.
-        private enum AutopilotCheck { NoTarget, Unsupported, NoWindow, NotEnoughDv, Ready }
+        private enum AutopilotCheck { NoTarget, Unsupported, Blocked, NoWindow, NotEnoughDv, Ready }
 
         // Everything AUTOPILOT needs to know before flying: is there an
         // interplanetary target, a transfer window, and enough dv. Shared by
@@ -1279,6 +1301,12 @@ namespace KSPMacropad
         {
             destinationBody = null;
             departureUT = arrivalUT = ejectionDv = captureDv = 0;
+
+            if (principiaLoaded)
+            {
+                if (log) Debug.Log("[KSPMacropad] AUTOPILOT: disabled because Principia is installed (n-body physics)");
+                return AutopilotCheck.Blocked;
+            }
 
             ITargetable target = FlightGlobals.fetch.VesselTarget;
             if (target == null)
@@ -1329,6 +1357,7 @@ namespace KSPMacropad
             switch (check)
             {
                 case AutopilotCheck.Ready: return LEDStates.AUTOPILOT_READY;
+                case AutopilotCheck.Blocked:
                 case AutopilotCheck.NoWindow:
                 case AutopilotCheck.NotEnoughDv: return LEDStates.AUTOPILOT_IMPOSSIBLE;
                 default: return LEDStates.AUTOPILOT_IDLE;
@@ -2006,7 +2035,7 @@ namespace KSPMacropad
         MacroStart StartCircularize()
         {
             Vessel vessel = FlightGlobals.ActiveVessel;
-            if (vessel == null)
+            if (vessel == null || BlockedByMechJeb(0x02, LEDStates.CIRC_UNAVAILABLE, "CIRCULARIZE"))
                 return MacroStart.Failed;
 
             Orbit orbit = vessel.orbit;
@@ -2060,7 +2089,7 @@ namespace KSPMacropad
         MacroStart StartDeorbitBurn()
         {
             Vessel vessel = FlightGlobals.ActiveVessel;
-            if (vessel == null)
+            if (vessel == null || BlockedByMechJeb(0x07, LEDStates.DEORBIT_UNAVAILABLE, "DEORBIT"))
                 return MacroStart.Failed;
 
             Orbit orbit = vessel.orbit;
@@ -2767,6 +2796,58 @@ namespace KSPMacropad
                 rcs.thrustPercentage = rcsLimiterTarget;
 
             Debug.Log("[KSPMacropad] AUX: RCS thrust limiter set to " + rcsLimiterTarget + "% on " + thrusters.Count + " thruster(s)");
+        }
+
+        // ------------------------------------------------------------------
+        // Other mods. Checked once per flight scene by assembly name, the
+        // same way kOS detects RemoteTech.
+        //   MechJeb2   - CIRCULARIZE, DEORBIT and TIME ACCEL are disabled so
+        //                two autopilots don't fight over the same vessel.
+        //                "allow_with_mechjeb = true" in KSPMacropad.cfg
+        //                turns them back on.
+        //   Principia  - n-body physics breaks the patched-conic transfer
+        //                math, so AUTOPILOT is disabled.
+        //   FAR        - logged only: SUICIDE BURN ignores drag entirely,
+        //                which triggers early (safe) under any aero model.
+        //   Kerbalism  - replaces stock science transmission, so TRANSMIT
+        //                SCIENCE is disabled.
+        // ------------------------------------------------------------------
+        void DetectOtherMods()
+        {
+            mechJebLoaded = AssemblyLoaded("MechJeb2");
+            principiaLoaded = AssemblyLoaded("ksp_plugin_adapter") || AssemblyLoaded("Principia");
+            farLoaded = AssemblyLoaded("FerramAerospaceResearch");
+            kerbalismLoaded = AssemblyLoaded("Kerbalism");
+            allowWithMechJeb = string.Equals(ReadConfigValue("allow_with_mechjeb"), "true", StringComparison.OrdinalIgnoreCase);
+
+            if (mechJebLoaded)
+                Debug.Log("[KSPMacropad] MechJeb detected - CIRCULARIZE, DEORBIT and TIME ACCEL " +
+                    (allowWithMechJeb ? "left enabled (allow_with_mechjeb = true)" : "disabled"));
+            if (principiaLoaded) Debug.Log("[KSPMacropad] Principia detected - AUTOPILOT disabled");
+            if (farLoaded) Debug.Log("[KSPMacropad] FAR detected - SUICIDE BURN ignores drag, so it triggers early (safe)");
+            if (kerbalismLoaded) Debug.Log("[KSPMacropad] Kerbalism detected - TRANSMIT SCIENCE disabled");
+        }
+
+        // Matches a loaded assembly by name, ignoring case and any version
+        // suffix (Kerbalism ships as e.g. "Kerbalism112").
+        static bool AssemblyLoaded(string name)
+        {
+            foreach (AssemblyLoader.LoadedAssembly loaded in AssemblyLoader.loadedAssemblies)
+            {
+                string n = loaded.assembly.GetName().Name;
+                if (n.StartsWith(name, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
+        }
+
+        bool BlockedByMechJeb(byte keyId, byte unavailableState, string macroName)
+        {
+            if (!mechJebLoaded || allowWithMechJeb)
+                return false;
+            Debug.Log("[KSPMacropad] " + macroName + ": disabled because MechJeb is installed (set allow_with_mechjeb = true in KSPMacropad.cfg to override)");
+            SetLEDState(keyId, unavailableState, 0x00);
+            return true;
         }
 
         // VesselDeltaV.TotalDeltaVActual: "The Total Simulated DeltaV
