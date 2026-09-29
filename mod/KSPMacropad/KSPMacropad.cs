@@ -376,7 +376,7 @@ namespace KSPMacropad
             UpdateLED(HEARTBEAT_ID, 0x00, 0x00);
         }
 
-        // Mode-1 OLED telemetry: live throttle % and warp index, diffed
+        // Mode-1 OLED telemetry: live throttle % and warp rate, diffed
         // against the last value actually sent (same "only on change"
         // pattern as the LED states).
         void SendTelemetry()
@@ -392,12 +392,31 @@ namespace KSPMacropad
                 UpdateLED(THROTTLE_TELEMETRY_ID, 0x00, (byte)throttlePct);
             }
 
-            int warpIndex = TimeWarp.CurrentRateIndex;
-            if (warpIndex != lastSentWarp)
+            // Warp goes out as the actual multiplier, not the rate index, so
+            // the pad doesn't need the (configurable) rate tables. Packed as
+            // mantissa x 10^exponent: data = mantissa (0-255), state low
+            // nibble = exponent, state bit 7 = physics warp. 100000x = 1e5.
+            byte warpState, warpData;
+            EncodeWarpRate(TimeWarp.CurrentRate, TimeWarp.WarpMode == TimeWarp.Modes.LOW, out warpState, out warpData);
+            int warpKey = (warpState << 8) | warpData;
+            if (warpKey != lastSentWarp)
             {
-                lastSentWarp = warpIndex;
-                UpdateLED(WARP_TELEMETRY_ID, 0x00, (byte)warpIndex);
+                lastSentWarp = warpKey;
+                UpdateLED(WARP_TELEMETRY_ID, warpState, warpData);
             }
+        }
+
+        internal static void EncodeWarpRate(float rate, bool physics, out byte state, out byte data)
+        {
+            double r = Math.Max(0.0, Math.Round(rate));
+            int exponent = 0;
+            while (r > 255 && exponent < 15)
+            {
+                r = Math.Round(r / 10.0);
+                exponent++;
+            }
+            state = (byte)(exponent | (physics ? 0x80 : 0x00));
+            data = (byte)Math.Min(255.0, r);
         }
 
         // Active macro / next queued macro / queue length for the pad's
