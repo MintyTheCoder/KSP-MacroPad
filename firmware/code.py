@@ -14,6 +14,10 @@ import neopixel
 import usb_cdc
 import displayio
 import terminalio
+try:
+    from i2cdisplaybus import I2CDisplayBus   # CircuitPython 9+
+except ImportError:
+    I2CDisplayBus = displayio.I2CDisplay      # CircuitPython 8
 from adafruit_display_text import label
 import adafruit_displayio_ssd1306
 
@@ -89,7 +93,7 @@ ROCKET_ART = (
 # ranges — same 5-byte packet frame, just new meanings for id/state/data.
 HEARTBEAT_ID = 0x14           # mod->pad, sent periodically regardless of state change
 THROTTLE_TELEMETRY_ID = 0x15  # data = live throttle % (0-100)
-WARP_TELEMETRY_ID = 0x16      # data = live warp index (mod-defined 0-255 lookup)
+WARP_TELEMETRY_ID = 0x16      # rate = data * 10^(state & 0x0F); state bit 7 set = physics warp
 ACTIVE_MACRO_ID = 0x17        # data = key id of the macro flying the vessel, NO_MACRO if none
 NEXT_MACRO_ID = 0x18          # data = key id at the head of the mod's queue, NO_MACRO if empty
 QUEUE_LENGTH_ID = 0x19        # data = number of queued macros (not counting the active one)
@@ -105,6 +109,26 @@ MACRO_TAGS = {
     0x0A: "SBRN",
     0x0F: "AUTO",
 }
+
+# States that pulse instead of holding a solid color. Value = pulse period
+# in seconds; faster means more urgent.
+PULSING_STATES = {
+    (0x0A, LEDStates.SUICIDEBURN_ARMED): 1.2,
+    (0x0A, LEDStates.SUICIDEBURN_IMMINENT): 0.4,
+    (0x0D, LEDStates.RESOURCE_CRITICAL): 0.5,
+    (0x0D, LEDStates.RESOURCE_DEPLETING): 1.0,
+    (0x0F, LEDStates.AUTOPILOT_EXECUTING): 1.6,
+    (0x10, LEDStates.UNDERGLOW_CRITICAL_RESOURCE): 0.5,
+    (0x10, LEDStates.UNDERGLOW_COMMS_LOST): 1.0,
+    (0x10, LEDStates.UNDERGLOW_MANEUVER_IMMINENT): 1.0,
+}
+PULSE_MIN_BRIGHTNESS = 0.15
+PULSE_FRAME_INTERVAL = 0.03
+
+# RENDEZVOUS PREP's data byte is closing speed (0 = holding or separating,
+# 255 = the mod's max). The key blends from its state color toward this
+# as the approach gets faster.
+RENDEZVOUS_FAST_COLOR = (255, 0, 0)
 
 HEARTBEAT_TIMEOUT = 3.0   # seconds since last heartbeat before we call it disconnected
 
@@ -129,7 +153,7 @@ pixels = neopixel.NeoPixel(board.D6, NUM_LEDS, auto_write=False)
 
 displayio.release_displays()
 _i2c = busio.I2C(board.D5, board.D4)   # SCL, SDA - the PCB routes the OLED to D5/D4 (D0/D1 are A0/A1, the matrix)
-_display_bus = displayio.I2CDisplay(_i2c, device_address=0x3C)
+_display_bus = I2CDisplayBus(_i2c, device_address=0x3C)
 display = adafruit_displayio_ssd1306.SSD1306(_display_bus, width=OLED_WIDTH, height=OLED_HEIGHT)
 
 
@@ -171,6 +195,10 @@ _right_last = right_enc.position
 
 _in_buf = bytearray()
 _last_hello = 0.0
+
+_pixel_base = [(0, 0, 0)] * NUM_LEDS   # color each pixel should show at full brightness
+_pixel_pulse = [None] * NUM_LEDS       # pulse period in seconds, None = solid
+_last_pulse_frame = 0.0
 
 
 # ----------------------------------------------------------------------------
@@ -444,18 +472,59 @@ def read_inbound_packet():
     return None
 
 
+def _blend(a, b, t):
+    return tuple(int(a[i] + (b[i] - a[i]) * t) for i in range(3))
+
+
+def _scale(color, k):
+    return tuple(int(c * k) for c in color)
+
+
 def apply_led_update(led_id, state, data):
     """Resolve an LED packet to a color and write it to the pixel chain."""
     lookup_id = 0x10 if 0x10 <= led_id <= 0x13 else led_id
     color = STATE_COLORS.get((lookup_id, state), (0, 0, 0))
 
+    if lookup_id == 0x06 and state != LEDStates.RENDEZVOUS_IDLE:
+        color = _blend(color, RENDEZVOUS_FAST_COLOR, data / 255)
+
     if led_id in KEY_TO_LED_CHAIN:
-        pixels[KEY_TO_LED_CHAIN[led_id]] = color
+        index = KEY_TO_LED_CHAIN[led_id]
     elif 0x10 <= led_id <= 0x13:
-        pixels[UNDERGLOW_CHAIN_INDICES[led_id - 0x10]] = color
+        index = UNDERGLOW_CHAIN_INDICES[led_id - 0x10]
     else:
         return
 
+    _pixel_base[index] = color
+    _pixel_pulse[index] = PULSING_STATES.get((lookup_id, state))
+    pixels[index] = color
+    pixels.show()
+
+
+def animate_pulses(now):
+    """Triangle-wave brightness on every pixel in a pulsing state."""
+    global _last_pulse_frame
+    if now - _last_pulse_frame < PULSE_FRAME_INTERVAL:
+        return
+    _last_pulse_frame = now
+    changed = False
+    for i in range(NUM_LEDS):
+        period = _pixel_pulse[i]
+        if period is None:
+            continue
+        phase = (now % period) / period
+        wave = 1 - abs(2 * phase - 1)
+        pixels[i] = _scale(_pixel_base[i], PULSE_MIN_BRIGHTNESS + (1 - PULSE_MIN_BRIGHTNESS) * wave)
+        changed = True
+    if changed:
+        pixels.show()
+
+
+def clear_leds():
+    for i in range(NUM_LEDS):
+        _pixel_base[i] = (0, 0, 0)
+        _pixel_pulse[i] = None
+    pixels.fill((0, 0, 0))
     pixels.show()
 
 
@@ -553,6 +622,12 @@ def format_macro_tag(active, nxt, count):
     return tag
 
 
+def format_warp(state, data):
+    """Warp rate as "1x", "50x", "100000x"; physics warp gets a P prefix ("P4x")."""
+    rate = data * 10 ** (state & 0x0F)
+    return "{}{}x".format("P" if state & 0x80 else "", rate)
+
+
 def update_display():
     """Refresh both OLED lines from current mode/dial/telemetry/connection
     state. Call only on a state change (mode toggle, nonzero encoder step,
@@ -568,7 +643,7 @@ def update_display():
         if live_throttle is None or live_warp is None:
             line2.text = "--"   # no telemetry received yet
         else:
-            line2.text = "THR {:>3}% WARP {}".format(live_throttle, live_warp)
+            line2.text = "THR {:>3}% WARP {}".format(live_throttle, format_warp(*live_warp))
     elif encoder_mode == 2:
         t = dial_targets[2]
         line2.text = "THR {:>3}% HDG {:>3}".format(t["left"], t["right"])
@@ -630,7 +705,7 @@ while True:
             if encoder_mode == 1:
                 update_display()
         elif packet_id == WARP_TELEMETRY_ID:
-            live_warp = data
+            live_warp = (state, data)
             if encoder_mode == 1:
                 update_display()
         elif packet_id == ACTIVE_MACRO_ID:
@@ -654,11 +729,15 @@ while True:
             active_macro = None
             next_macro = None
             queued_count = 0
+            live_throttle = None
+            live_warp = None
+            clear_leds()
         else:
             send_resync()
         update_display()
 
     now = time.monotonic()
+    animate_pulses(now)
     if now - _last_hello >= PAD_HELLO_INTERVAL:
         _last_hello = now
         send_hello()
